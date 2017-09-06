@@ -4,6 +4,8 @@ import fileinput
 import os.path
 import datetime
 
+DATE_TIME_FORMAT = '%Y-%m-%d %H:%M %p'
+
 if __name__ == "__main__":
     todays_date_str = datetime.date.today().isoformat()
     update_input = True
@@ -27,4 +29,4 @@ if __name__ == "__main__":
     if update_input:
         if not last_line.endswith(os.linesep):
             print('')
-        print('{:<24}'.format(datetime.datetime.now().strftime('%Y-%m-%d %H:%M %p')), end='')
+        print('{:<24}'.format(datetime.datetime.now().strftime(DATE_TIME_FORMAT)), end='')

@@ -3,6 +3,7 @@ import fileinput
 import edn_format
 import re
 import sys
+import pprint
 
 
 class TagOptionalKey(edn_format.TaggedElement):
@@ -126,6 +127,7 @@ if __name__ == "__main__":
     try:
         # Find out all the names of the classes that are present in the string to format
         set_of_classes = set(re.findall(r"#([a-zA-Z][a-zA-Z0-9\.\-]*)[\s]*[{\[]", string_to_format))
+        print('set_of_classes: ', set_of_classes)
         for class_name in set_of_classes:
             fqn_name = class_name
             new_class_name = fqn_name.replace('.', '_') + 'Class'
@@ -142,6 +144,8 @@ if __name__ == "__main__":
         new_object = edn_format.loads(string_to_format.encode('utf-8'))
         print('-----------')
         print(edn_format.dumps(new_object, sort_keys=True).encode('utf-8'))
+        print('-----done------')
+
     except:
         for line in original_lines:
             print line,
