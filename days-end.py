@@ -11,6 +11,9 @@ import subprocess
 import tempfile
 
 DATE_TIME_FORMAT = '%Y-%m-%d %H:%M %p'
+OUTPUT_FORMAT = "{:19}  {:15}  {}"
+BASH_INPUT_PATTERN = re.compile("^\s*([0-9]*)\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*(.*)$")
+UTILS_ACTION_INPUT_PATTERN = re.compile("^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*(.*)(\n?)$")
 
 def find_path():
     file_path = os.path.join( os.environ.get("HOME"), 'Library', 'Application Support', 'Google', 'Chrome', 'Profile 1', 'History')
@@ -33,9 +36,14 @@ def get_utils_actions(for_date=datetime.date.today()):
     path = os.path.join(os.environ.get("HOME"), "reports", "action-logs", "action-log-{}.txt".format(date_str))
     if os.path.isfile(path):
         file = open(path, 'r')
-        return file.readlines()
+        res_lines = []
+        for line in file.readlines():
+            matches = UTILS_ACTION_INPUT_PATTERN.match(line)
+            res_lines.append(OUTPUT_FORMAT.format(matches.group(1), "Utils Action", matches.group(2)))
+        return res_lines
     else:
-        return None
+        return []
+
 
 def get_chrome_history(for_date=datetime.date.today()):
 
@@ -52,56 +60,77 @@ def get_chrome_history(for_date=datetime.date.today()):
         con.close()
     finally:
         cleanup(history_file_path)
-    return allrows
-
-def run_command(cmd):
-    """given shell command, returns communication tuple of stdout and stderr
-    based on https://stackoverflow.com/questions/4760215/running-shell-command-from-python-and-capturing-the-output"""
-    return subprocess.Popen(cmd,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            stdin=subprocess.PIPE).communicate()
-
-def run_command2(command):
-    p = subprocess.Popen(command,
-                         stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE,
-                         stdin=subprocess.PIPE,
-                         shell=True, executable="/bin/bash")
-    # Read stdout from subprocess until the buffer is empty !
-    for line in iter(p.stdout.readline, b''):
-        if line: # Don't print blank lines
-            yield line
-    # This ensures the process has completed, AND sets the 'returncode' attr
-    while p.poll() is None:
-        sleep(.1) #Don't waste CPU-cycles
-    # Empty STDERR buffer
-    err = p.stderr.read()
-    if p.returncode != 0:
-       # The run_command() function is responsible for logging STDERR
-       print("Error: '" + str(err) + "'")
-
-def run_command3(exe):
-    p = subprocess.Popen(exe, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                         shell=True)
-    (stdout, stderr) = p.communicate()
-                         ## Wait for date to terminate. Get return returncode ##
-    p_status = p.wait()
-    print( "Command output : ", stdout)
-    print( "Command exit status/return code : ", p_status)
-    for line in stdout:
-        if line and pattern.match(line): # Don't print blank lines
-            yield line
+    res_lines = []
+    for line in allrows:
+        res_lines.append(OUTPUT_FORMAT.format(line[0], "Chrome", line[1] + ' ' + line[2]))
+    return res_lines
 
 
+# def run_command(cmd):
+#     """given shell command, returns communication tuple of stdout and stderr
+#     based on https://stackoverflow.com/questions/4760215/running-shell-command-from-python-and-capturing-the-output"""
+#     return subprocess.Popen(cmd,
+#                             stdout=subprocess.PIPE,
+#                             stderr=subprocess.PIPE,
+#                             stdin=subprocess.PIPE).communicate()
+#
+# def run_command2(command):
+#     p = subprocess.Popen(command,
+#                          stdout=subprocess.PIPE,
+#                          stderr=subprocess.PIPE,
+#                          stdin=subprocess.PIPE,
+#                          shell=True, executable="/bin/bash")
+#     # Read stdout from subprocess until the buffer is empty !
+#     for line in iter(p.stdout.readline, b''):
+#         if line: # Don't print blank lines
+#             yield line
+#     # This ensures the process has completed, AND sets the 'returncode' attr
+#     while p.poll() is None:
+#         sleep(.1) #Don't waste CPU-cycles
+#     # Empty STDERR buffer
+#     err = p.stderr.read()
+#     if p.returncode != 0:
+#        # The run_command() function is responsible for logging STDERR
+#        print("Error: '" + str(err) + "'")
+#
+# def run_command3(exe):
+#     p = subprocess.Popen(exe, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+#                          shell=True)
+#     (stdout, stderr) = p.communicate()
+#                          ## Wait for date to terminate. Get return returncode ##
+#     p_status = p.wait()
+#     print( "Command output : ", stdout)
+#     print( "Command exit status/return code : ", p_status)
+#     for line in stdout:
+#         if line and pattern.match(line): # Don't print blank lines
+#             yield line
+
+
+def reformat_bash_history(line):
+    """
+    Parse the incoming line of bash history into a "standard" format
+
+    Expected incoming format for each line:
+      158  2017-10-02 17:58:14 	orca stop
+
+    Expected output format for each line:
+    2017-10-02 17:58:14  bash  158  orca stop
+    """
+    matches = BASH_INPUT_PATTERN.match(line)
+    if len(matches.groups()) > 0:
+        return OUTPUT_FORMAT.format(matches.group(2), "bash", matches.group(1) + "  " + matches.group(3))
+    else:
+        return ""
 
 def get_bash_history(for_date=datetime.date.today()):
+    res_lines = []
     date_str = for_date.strftime('%Y-%m-%d')
     pattern = re.compile("^ *[0-9]*  {}.*".format(date_str))
-    cmd = 'bash -i -c "history -r; history"'
+#     cmd = 'bash -i -c "history -r; history"'
+    cmd = 'bash -i -c "history -n; history"'
 #     cmd = 'bash -i -c "history"'
 #     cmd = 'history'
-    print('date_str: "{}" command: "{}"'.format(date_str, cmd))
+#     print('date_str: "{}" command: "{}"'.format(date_str, cmd))
     p = subprocess.Popen(cmd,
                          stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE,
@@ -109,7 +138,7 @@ def get_bash_history(for_date=datetime.date.today()):
     # Read stdout from subprocess until the buffer is empty !
     for line in iter(p.stdout.readline, b''):
         if line and pattern.match(line): # Don't print blank lines
-            yield line
+            res_lines.append(reformat_bash_history(line))
     # This ensures the process has completed, AND sets the 'returncode' attr
     while p.poll() is None:
         sleep(.1) #Don't waste CPU-cycles
@@ -118,7 +147,7 @@ def get_bash_history(for_date=datetime.date.today()):
     if p.returncode != 0:
        # The run_command() function is responsible for logging STDERR
        print("Error: '" + str(err) + "'")
-
+    return res_lines
 
 if __name__ == "__main__":
     todays_date_str = datetime.date.today().isoformat()
@@ -154,14 +183,15 @@ if __name__ == "__main__":
         print('{:<24} Leaving for the day\n\n'.format(desired_date.strftime(DATE_TIME_FORMAT)), end='')
         print('\nToday''s Chrome history:\n==============================\n')
         for row in get_chrome_history(desired_date):
-            print('{0[0]}  {0[1]:70}  {0[2]}'.format(row))
+            print(row)
         print('\n==============================\n\n')
         print('\nToday''s bash history:\n==============================\n')
         for line in get_bash_history(desired_date):
-            print(line, end='')
+            print(line)
         print('\n==============================\n\n')
         print('\nToday''s clojure utils action history:\n==============================\n')
-        print(get_utils_actions(desired_date))
+        for line in get_utils_actions(desired_date):
+            print(line)
         print('\n==============================')
 
 
