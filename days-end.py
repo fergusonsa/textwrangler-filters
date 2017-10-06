@@ -12,6 +12,7 @@ import tempfile
 
 DATE_TIME_FORMAT = '%Y-%m-%d %H:%M %p'
 OUTPUT_FORMAT = "{:19}  {:15}  {}"
+BASH_HISTORY_INPUT_PATTERN = re.compile("^([^ ]*)\s*([0-9]*)\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*(.*)$")
 BASH_INPUT_PATTERN = re.compile("^\s*([0-9]*)\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*(.*)$")
 UTILS_ACTION_INPUT_PATTERN = re.compile("^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*(.*)(\n?)$")
 
@@ -55,7 +56,7 @@ def get_chrome_history(for_date=datetime.date.today()):
         con.text_factory = str
         c = con.cursor()
 
-        rows = c.execute('select datetime(last_visit_time/1000000-11644473600,"unixepoch"),title, url from urls where datetime(last_visit_time/1000000-11644473600,"unixepoch") >= datetime("' + date_str + 'T00:00") order by last_visit_time desc')
+        rows = c.execute('select datetime(last_visit_time/1000000-11644473600, "unixepoch", "localtime"),title, url from urls where datetime(last_visit_time/1000000-11644473600,"unixepoch", "localtime") >= datetime("' + date_str + 'T00:00") order by last_visit_time desc')
         allrows = rows.fetchall()
         con.close()
     finally:
@@ -64,46 +65,6 @@ def get_chrome_history(for_date=datetime.date.today()):
     for line in allrows:
         res_lines.append(OUTPUT_FORMAT.format(line[0], "Chrome", line[1] + ' ' + line[2]))
     return res_lines
-
-
-# def run_command(cmd):
-#     """given shell command, returns communication tuple of stdout and stderr
-#     based on https://stackoverflow.com/questions/4760215/running-shell-command-from-python-and-capturing-the-output"""
-#     return subprocess.Popen(cmd,
-#                             stdout=subprocess.PIPE,
-#                             stderr=subprocess.PIPE,
-#                             stdin=subprocess.PIPE).communicate()
-#
-# def run_command2(command):
-#     p = subprocess.Popen(command,
-#                          stdout=subprocess.PIPE,
-#                          stderr=subprocess.PIPE,
-#                          stdin=subprocess.PIPE,
-#                          shell=True, executable="/bin/bash")
-#     # Read stdout from subprocess until the buffer is empty !
-#     for line in iter(p.stdout.readline, b''):
-#         if line: # Don't print blank lines
-#             yield line
-#     # This ensures the process has completed, AND sets the 'returncode' attr
-#     while p.poll() is None:
-#         sleep(.1) #Don't waste CPU-cycles
-#     # Empty STDERR buffer
-#     err = p.stderr.read()
-#     if p.returncode != 0:
-#        # The run_command() function is responsible for logging STDERR
-#        print("Error: '" + str(err) + "'")
-#
-# def run_command3(exe):
-#     p = subprocess.Popen(exe, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-#                          shell=True)
-#     (stdout, stderr) = p.communicate()
-#                          ## Wait for date to terminate. Get return returncode ##
-#     p_status = p.wait()
-#     print( "Command output : ", stdout)
-#     print( "Command exit status/return code : ", p_status)
-#     for line in stdout:
-#         if line and pattern.match(line): # Don't print blank lines
-#             yield line
 
 
 def reformat_bash_history(line):
@@ -121,6 +82,19 @@ def reformat_bash_history(line):
         return OUTPUT_FORMAT.format(matches.group(2), "bash", matches.group(1) + "  " + matches.group(3))
     else:
         return ""
+
+
+def get_bash_history2(for_date=datetime.date.today()):
+    res_lines = []
+    date_str = for_date.strftime('%Y-%m-%d')
+    path = os.path.join(os.environ.get("HOME"), "reports", "bash_history", "bash_history-{}.txt".format(date_str))
+    if os.path.isfile(path):
+        file = open(path, 'r')
+        for line in file.readlines():
+            matches = BASH_HISTORY_INPUT_PATTERN.match(line)
+            res_lines.append(OUTPUT_FORMAT.format(matches.group(3), "bash", matches.group(1) + " " + matches.group(2) + " " + matches.group(4)))
+
+    return list(set(res_lines))
 
 def get_bash_history(for_date=datetime.date.today()):
     res_lines = []
@@ -181,17 +155,28 @@ if __name__ == "__main__":
         if not last_line.endswith(os.linesep):
             print('')
         print('{:<24} Leaving for the day\n\n'.format(desired_date.strftime(DATE_TIME_FORMAT)), end='')
-        print('\nToday''s Chrome history:\n==============================\n')
-        for row in get_chrome_history(desired_date):
-            print(row)
-        print('\n==============================\n\n')
-        print('\nToday''s bash history:\n==============================\n')
-        for line in get_bash_history(desired_date):
-            print(line)
-        print('\n==============================\n\n')
-        print('\nToday''s clojure utils action history:\n==============================\n')
-        for line in get_utils_actions(desired_date):
+#         print('\nToday''s Chrome history:\n==============================\n')
+#         all_history = res = get_chrome_history(desired_date)
+#         for row in res:
+#             print(row)
+#         print('\n==============================\n\n')
+#         print('\nToday''s bash history:\n==============================\n')
+#         res = get_bash_history2(desired_date)
+#         all_history.extend(res)
+#         for line in res:
+#             print(line)
+#         print('\n==============================\n\n')
+#         print('\nToday''s clojure utils action history:\n==============================\n')
+#         res = get_utils_actions(desired_date)
+#         all_history.extend(res)
+#         for line in res:
+#             print(line)
+#         print('\n==============================')
+        all_history = get_chrome_history(desired_date)
+        all_history.extend(get_utils_actions(desired_date))
+        all_history.extend(get_bash_history2(desired_date))
+        print('\n=============    Actions HISTORY ================')
+
+        for line in sorted(all_history):
             print(line)
         print('\n==============================')
-
-
