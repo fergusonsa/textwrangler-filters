@@ -1,84 +1,18 @@
 #!/usr/bin/python
 import fileinput
 import edn_format
+import edn_format.edn_lex as edn_lex
+import edn_format.edn_parse as edn_parse
+import edn_format.edn_dump as edn_dump
+import edn_format.immutable_dict
 import re
 import sys
 import pprint
+import pyrfc3339
+import datetime
+import decimal
+import itertools
 
-
-class TagOptionalKey(edn_format.TaggedElement):
-            def __init__(self, value):
-                super(TagOptionalKey, self).__init__()
-                self.name = 'schema.core.OptionalKey'
-                self.key = ''
-                self.value = value
-
-            def __str__(self):
-                return '#{} {}'.format(
-                    self.name,
-#                     self.key,
-                    self.value)
-
-class TagOne(edn_format.TaggedElement):
-            def __init__(self, value):
-                super(TagOne, self).__init__()
-                self.name = 'schema.core.One'
-                self.key = ''
-                self.value = value
-
-            def __str__(self):
-                return '#{} {}'.format(
-                    self.name,
-#                     self.key,
-                    self.value)
-
-class TagWebServer(edn_format.TaggedElement):
-            def __init__(self, value):
-                super(TagWebServer, self).__init__()
-                self.name = 'cenx.mercury.servers.web.WebServer'
-                self.key = ''
-                self.value = value
-
-            def __str__(self):
-                return '#{} {}'.format(
-                    self.name,
-#                     self.key,
-                    self.value)
-
-class TagWebSocketServer(edn_format.TaggedElement):
-            def __init__(self, value):
-                super(TagWebSocketServer, self).__init__()
-                self.name = 'cenx.mercury.servers.web.WebSocketServer'
-                self.key = ''
-                self.value = value
-
-            def __str__(self):
-                return '#{} {}'.format(
-                    self.name,
-#                     self.key,
-                    self.value)
-
-class TagObject(edn_format.TaggedElement):
-            def __init__(self, value):
-                super(TagObject, self).__init__()
-                self.name = 'object'
-                self.value = value
-
-            def __str__(self):
-                return '#{} {}'.format(
-                    self.name,
-                    self.value)
-
-class TagPolar(edn_format.TaggedElement):
-            def __init__(self, value):
-                super(TagPolar, self).__init__()
-                self.name = 'Polar'
-                self.value = value
-
-            def __str__(self):
-                return '#{} {}'.format(
-                    self.name,
-                    self.value)
 
 class BaseClass(edn_format.TaggedElement):
     def __init__(self, classtype):
@@ -117,6 +51,146 @@ def subclass__str__(self):
         val_str)
 
 
+def print_class(obj,
+              indent=0,
+              string_encoding=edn_dump.DEFAULT_INPUT_ENCODING,
+              keyword_keys=False,
+              sort_keys=False):
+    pass
+
+def print_map(obj,
+              indent=0,
+              string_encoding=edn_dump.DEFAULT_INPUT_ENCODING,
+              keyword_keys=False,
+              sort_keys=False):
+    indent = indent + 4
+    pairs = obj.items()
+    if sort_keys:
+        pairs = sorted(pairs, key=lambda p: str(p[0]))
+    if keyword_keys:
+        pairs = ((edn_lex.Keyword(k) if isinstance(k, (bytes, basestring)) else k, v) for k, v in pairs)
+
+
+    print('{{{}}}'.format(edn_dump.seq(itertools.chain.from_iterable(pairs), **{
+        "string_encoding": string_encoding,
+        "keyword_keys": keyword_keys,
+        "sort_keys": sort_keys,
+    })))
+
+def print_list(obj,
+              indent=0,
+              string_encoding=edn_dump.DEFAULT_INPUT_ENCODING,
+              keyword_keys=False,
+              sort_keys=False):
+    print('({})'.format(edn_dump.seq(obj, **{
+        "string_encoding": string_encoding,
+        "keyword_keys": keyword_keys,
+        "sort_keys": sort_keys,
+    })))
+
+def print_vector(obj,
+               indent=0,
+               string_encoding=edn_dump.DEFAULT_INPUT_ENCODING,
+               keyword_keys=False,
+               sort_keys=False):
+    print('[{}]'.format(edn_dump.seq(obj, **{
+        "string_encoding": string_encoding,
+        "keyword_keys": keyword_keys,
+        "sort_keys": sort_keys,
+    })))
+
+
+def print_set(obj,
+              indent=0,
+              string_encoding=edn_dump.DEFAULT_INPUT_ENCODING,
+              keyword_keys=False,
+              sort_keys=False):
+    print('#{{{}}}'.format(edn_dump.seq(obj, **{
+        "string_encoding": string_encoding,
+        "keyword_keys": keyword_keys,
+        "sort_keys": sort_keys,
+    })))
+
+def print_edn(obj,
+              indent=0,
+              string_encoding=edn_dump.DEFAULT_INPUT_ENCODING,
+              keyword_keys=False,
+              sort_keys=False):
+
+    kwargs = {
+        "string_encoding": string_encoding,
+        "keyword_keys": keyword_keys,
+        "sort_keys": sort_keys,
+    }
+
+    if obj is None:
+        print('nil')
+    elif isinstance(obj, bool):
+        print('true' if obj else 'false')
+    elif isinstance(obj, (int, long, float)):
+        print(unicode(obj))
+    elif isinstance(obj, decimal.Decimal):
+        print('{}M'.format(obj))
+    elif isinstance(obj, (edn_lex.Keyword, edn_lex.Symbol)):
+        print(unicode(obj))
+    # CAVEAT EMPTOR! In Python 3 'basestring' is alised to 'str' above.
+    # Furthermore, in Python 2 bytes is an instance of 'str'/'basestring' while
+    # in Python 3 it is not.
+    elif isinstance(obj, bytes):
+        print(edn_dump.unicode_escape(obj.decode(string_encoding)))
+    elif isinstance(obj, basestring):
+        print(edn_dump.unicode_escape(obj))
+    elif isinstance(obj, tuple):
+        print_list(obj, indent, string_encoding, keyword_keys, sort_keys)
+    elif isinstance(obj, list):
+        print_vector(obj, indent, string_encoding, keyword_keys, sort_keys)
+    elif isinstance(obj, set) or isinstance(obj, frozenset):
+        print_set(obj, indent, string_encoding, keyword_keys, sort_keys)
+    elif isinstance(obj, dict) or isinstance(obj, edn_format.immutable_dict.ImmutableDict):
+        print_map(obj, indent, string_encoding, keyword_keys, sort_keys)
+    elif isinstance(obj, datetime.datetime):
+        print('#inst "{}"'.format(pyrfc3339.generate(obj, microseconds=True)))
+    elif isinstance(obj, datetime.date):
+        print('#inst "{}"'.format(obj.isoformat()))
+    elif isinstance(obj, uuid.UUID):
+        print('#uuid "{}"'.format(obj))
+    elif isinstance(obj, edn_parse.TaggedElement):
+        print(unicode(obj))
+    else:
+        raise NotImplementedError(
+            u"encountered object of type '{}' for which no known encoding is available: {}".format(
+                type(obj), repr(obj)))
+
+def get_edn_obj_from_string(string_of_edn):
+    # Find out all the names of the classes that are present in the string to format
+    set_of_classes = set(re.findall(r"#([a-zA-Z][a-zA-Z0-9\.\-]*)[\s]*[{\[]", string_of_edn))
+    for class_name in set_of_classes:
+        fqn_name = class_name
+        new_class_name = fqn_name.replace('.', '_') + 'Class'
+        print('Creating class for %s with name %s and from original found text %s' % (fqn_name, new_class_name, class_name))
+        SpecialClass = type(new_class_name, (edn_format.TaggedElement,), {'name': fqn_name, '__init__': subclass_init, '__str__': subclass__str__})
+        edn_format.add_tag(fqn_name, SpecialClass)
+    return edn_format.loads(string_of_edn.encode('utf-8'))
+
+
+def print_edn_format(string_to_format):
+    new_object = get_edn_obf_from_string(string_to_format)
+    print('-----done------')
+    print(edn_format.dumps(new_object, sort_keys=True).encode('utf-8'))
+    print('-----print------')
+    print_edn(new_object)
+    print('-----------')
+
+def load_file(path):
+    contents = ""
+    file = open(path, 'r')
+    for line in file:
+        clean_line = line.strip()
+        if not clean_line.startswith(';'):
+            contents = contents + ' ' + clean_line
+    return  contents
+
+
 if __name__ == "__main__":
     string_to_format = ''
     original_lines = []
@@ -125,26 +199,8 @@ if __name__ == "__main__":
         original_lines.append(line)
 
     try:
-        # Find out all the names of the classes that are present in the string to format
-        set_of_classes = set(re.findall(r"#([a-zA-Z][a-zA-Z0-9\.\-]*)[\s]*[{\[]", string_to_format))
-        print('set_of_classes: ', set_of_classes)
-        for class_name in set_of_classes:
-            fqn_name = class_name
-            new_class_name = fqn_name.replace('.', '_') + 'Class'
-            print('Creating class for %s with name %s and from original found text %s' % (fqn_name, new_class_name, class_name))
-            SpecialClass = type(new_class_name, (edn_format.TaggedElement,), {'name': fqn_name, '__init__': subclass_init, '__str__': subclass__str__})
-#             SpecialClass = ClassFactory(new_class_name, fqn_name, ['value'])
-            edn_format.add_tag(fqn_name, SpecialClass)
-#         edn_format.add_tag('schema.core.OptionalKey', TagOptionalKey)
-#         edn_format.add_tag('schema.core.One', TagOne)
-#         edn_format.add_tag('cenx.mercury.servers.web.WebServer', TagWebServer)
-#         edn_format.add_tag('cenx.mercury.servers.websocket.WebSocketServer', TagWebSocketServer)
-#         edn_format.add_tag('object', TagObject)
-#         edn_format.add_tag('cenx.polar.services.Polar', TagPolar)
-        new_object = edn_format.loads(string_to_format.encode('utf-8'))
-        print('-----------')
-        print(edn_format.dumps(new_object, sort_keys=True).encode('utf-8'))
-        print('-----done------')
+
+        print_edn_format(string_to_format)
 
     except:
         for line in original_lines:

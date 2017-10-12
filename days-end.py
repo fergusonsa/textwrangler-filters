@@ -150,28 +150,10 @@ if __name__ == "__main__":
         desired_date = yesterdays_date
     else:
         desired_date = datetime.datetime.now()
-
-    if update_input or (is_yesterdays_file and last_line != "=============================="):
+    if update_input or (is_yesterdays_file and last_line != "==============================\n"):
         if not last_line.endswith(os.linesep):
             print('')
         print('{:<24} Leaving for the day\n\n'.format(desired_date.strftime(DATE_TIME_FORMAT)), end='')
-#         print('\nToday''s Chrome history:\n==============================\n')
-#         all_history = res = get_chrome_history(desired_date)
-#         for row in res:
-#             print(row)
-#         print('\n==============================\n\n')
-#         print('\nToday''s bash history:\n==============================\n')
-#         res = get_bash_history2(desired_date)
-#         all_history.extend(res)
-#         for line in res:
-#             print(line)
-#         print('\n==============================\n\n')
-#         print('\nToday''s clojure utils action history:\n==============================\n')
-#         res = get_utils_actions(desired_date)
-#         all_history.extend(res)
-#         for line in res:
-#             print(line)
-#         print('\n==============================')
         all_history = get_chrome_history(desired_date)
         all_history.extend(get_utils_actions(desired_date))
         all_history.extend(get_bash_history2(desired_date))
