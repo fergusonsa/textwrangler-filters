@@ -72,7 +72,7 @@ def reformat_bash_history(line):
     Parse the incoming line of bash history into a "standard" format
 
     Expected incoming format for each line:
-      158  2017-10-02 17:58:14 	orca stop
+      158  2017-10-02 17:58:14     orca stop
 
     Expected output format for each line:
     2017-10-02 17:58:14  bash  158  orca stop
@@ -123,16 +123,13 @@ def get_bash_history(for_date=datetime.date.today()):
        print("Error: '" + str(err) + "'")
     return res_lines
 
-if __name__ == "__main__":
-    todays_date_str = datetime.date.today().isoformat()
-    yesterdays_date = (datetime.date.today() - datetime.timedelta(1))
+def get_todays_file_path(todays_date_str=datetime.date.today().isoformat()):
+    return os.path.abspath(os.path.join(os.path.expanduser('~'),
+                                        'notes',
+                                        '{}.txt'.format(todays_date_str)))
 
-    update_input = True
-    is_yesterdays_file = False
-    expected_filename = os.path.abspath(os.path.join(os.path.expanduser('~'),
-                                                     'notes',
-                                                     '{}.txt'.format(todays_date_str)))
 
+def skip_existing_contents(expected_filename, todays_date_str, previous_date):
     if not os.path.exists(expected_filename):
         update_input = False
 
@@ -142,14 +139,86 @@ if __name__ == "__main__":
         if fileinput.isfirstline():
             # Check the start of the first line to make sure that it has today's date
             update_input = line.startswith(todays_date_str)
-            is_yesterdays_file = line.startswith(yesterdays_date.isoformat())
+            is_yesterdays_file = line.startswith(previous_date.isoformat())
 
         print(line, end='')
+    return update_input, is_yesterdays_file, last_line
+
+def get_fridays_date(todays_date=datetime.date.today()):
+    target_dayofweek = 4  # Friday
+    current_dayofweek = todays_date.weekday() # Today
+
+    if target_dayofweek <= current_dayofweek:
+        # target is in the current week
+        return todays_date - datetime.timedelta(days=(current_dayofweek - target_dayofweek))
+
+    else:
+        # target is in the previous week
+        return todays_date - datetime.timedelta(weeks=1) + datetime.timedelta(days=(target_dayofweek - current_dayofweek))
+
+
+def is_filename_between_dates(file_path, start_date, end_date):
+    parts = NOTE_FILENAME_PATTERN.match(os.path.basename(file_path))
+    return parts and start_date <= datetime.date(int(parts.group(1)), int(parts.group(2)), int(parts.group(3))) <= end_date
+
+
+def get_file_history(file_path):
+    file_date = datetime.datetime.strptime(os.path.splitext(os.path.basename(file_path))[0], '%Y-%m-%d')
+    first_timestamp = last_timestamp = timestamp = None
+    with open(file_path, 'r') as flh:
+        # Get the first and last times for entries in the file.
+        for line in flh.readlines():
+            parts = NOTE_FILE_LINE_PATTERN.match(line)
+            if parts:
+                timestamp = datetime.datetime(int(parts.group(1)), int(parts.group(2)), int(parts.group(3)),
+                                              int(parts.group(4)), int(parts.group(5)))
+                if (not first_timestamp or timestamp < first_timestamp) and timestamp > file_date:
+                    first_timestamp = timestamp
+                elif (not last_timestamp or timestamp > last_timestamp) and timestamp > file_date:
+                    last_timestamp = timestamp
+    return {"date": file_date,
+            "filepath": file_path,
+            "start": first_timestamp,
+            "end": last_timestamp,
+            "period": last_timestamp - first_timestamp if last_timestamp and first_timestamp else None}
+
+
+def get_notes_history(end_date=get_fridays_date()):
+    # Get list of files from the past week
+    week_start_date = end_date - datetime.timedelta(days=6)
+    dir_path = os.path.abspath(os.path.join(os.path.expanduser('~'), 'notes'))
+    files_list = [fl for fl in os.listdir(dir_path) if is_filename_between_dates(fl, week_start_date, end_date)]
+    res = {}
+    for x in files_list:
+        res[x] = get_file_history(os.path.join(dir_path, x))
+    return res
+
+
+def print_notes_times(fridays_date=get_fridays_date()):
+    print('{:<24} End of the week\n\n======= Weeks End Times ========\n'.format(datetime.datetime.now().strftime(DATE_TIME_FORMAT)))
+    data = get_notes_history(fridays_date)
+    for key in sorted(data.iterkeys()):
+        print('{date:%Y-%m-%d}   {start:%H:%M}   {end:%H:%M}   {period}'.format(**data[key]))
+
+    print('\n==============================')
+
+def main():
+    todays_date_str = datetime.date.today().isoformat()
+    yesterdays_date = (datetime.date.today() - datetime.timedelta(1))
+
+    update_input = True
+    is_yesterdays_file = False
+    expected_filename = get_todays_file_path()
+
+    (update_input, is_yesterdays_file, last_line) = skip_existing_contents(expected_filename,
+                                                                           todays_date_str,
+                                                                           yesterdays_date)
 
     if is_yesterdays_file and last_line != "==============================":
         desired_date = yesterdays_date
     else:
         desired_date = datetime.datetime.now()
+
     if update_input or (is_yesterdays_file and last_line != "==============================\n"):
         if not last_line.endswith(os.linesep):
             print('')
@@ -161,4 +230,11 @@ if __name__ == "__main__":
 
         for line in sorted(all_history):
             print(line)
+
+        if desired_date.weekday == 4:
+            print_notes_times(desired_date)
         print('\n==============================')
+
+
+if __name__ == "__main__":
+    main()

@@ -58,24 +58,44 @@ def print_class(obj,
               sort_keys=False):
     pass
 
+def format_map_entrys(pairs,
+                      indent=0,
+                      string_encoding=edn_dump.DEFAULT_INPUT_ENCODING,
+                      keyword_keys=False,
+                      sort_keys=False):
+    indent_str = '\n{}'.format(' ' * (4*indent))
+    if len(pairs) > 1:
+        return indent_str.join('{}'.format(edn_dump.seq(itertools.chain.from_iterable(pairs), **{
+#                 "indent": indent + 1,
+                "string_encoding": string_encoding,
+                "keyword_keys": keyword_keys,
+                "sort_keys": sort_keys,})))
+
+    else:
+        return '{}\n'.format(edn_dump.seq(obj, **{
+#             "indent": indent,
+            "string_encoding": string_encoding,
+            "keyword_keys": keyword_keys,
+            "sort_keys": sort_keys,}))
+
 def print_map(obj,
               indent=0,
               string_encoding=edn_dump.DEFAULT_INPUT_ENCODING,
               keyword_keys=False,
               sort_keys=False):
-    indent = indent + 4
+    indent = indent + 1
     pairs = obj.items()
     if sort_keys:
         pairs = sorted(pairs, key=lambda p: str(p[0]))
     if keyword_keys:
         pairs = ((edn_lex.Keyword(k) if isinstance(k, (bytes, basestring)) else k, v) for k, v in pairs)
 
-
-    print('{{{}}}'.format(edn_dump.seq(itertools.chain.from_iterable(pairs), **{
+    breaker = '\n' if len(pairs) > 1 else ""
+    print('{{{}{}}}'.format(breaker, format_map_entrys(pairs, **{
+        "indent": indent,
         "string_encoding": string_encoding,
         "keyword_keys": keyword_keys,
-        "sort_keys": sort_keys,
-    })))
+        "sort_keys": sort_keys,})))
 
 def print_list(obj,
               indent=0,
@@ -83,6 +103,7 @@ def print_list(obj,
               keyword_keys=False,
               sort_keys=False):
     print('({})'.format(edn_dump.seq(obj, **{
+#         "indent": indent,
         "string_encoding": string_encoding,
         "keyword_keys": keyword_keys,
         "sort_keys": sort_keys,
@@ -94,6 +115,7 @@ def print_vector(obj,
                keyword_keys=False,
                sort_keys=False):
     print('[{}]'.format(edn_dump.seq(obj, **{
+#         "indent": indent,
         "string_encoding": string_encoding,
         "keyword_keys": keyword_keys,
         "sort_keys": sort_keys,
@@ -105,7 +127,8 @@ def print_set(obj,
               string_encoding=edn_dump.DEFAULT_INPUT_ENCODING,
               keyword_keys=False,
               sort_keys=False):
-    print('#{{{}}}'.format(edn_dump.seq(obj, **{
+    print('#{{\n{}}}'.format(edn_dump.seq(obj, **{
+#         "indent": indent,
         "string_encoding": string_encoding,
         "keyword_keys": keyword_keys,
         "sort_keys": sort_keys,
@@ -174,7 +197,7 @@ def get_edn_obj_from_string(string_of_edn):
 
 
 def print_edn_format(string_to_format):
-    new_object = get_edn_obf_from_string(string_to_format)
+    new_object = get_edn_obj_from_string(string_to_format)
     print('-----done------')
     print(edn_format.dumps(new_object, sort_keys=True).encode('utf-8'))
     print('-----print------')
