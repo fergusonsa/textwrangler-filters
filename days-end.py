@@ -12,8 +12,19 @@ import tempfile
 
 DATE_TIME_FORMAT = '%Y-%m-%d %H:%M %p'
 OUTPUT_FORMAT = "{:19}  {:15}  {}"
-BASH_HISTORY_INPUT_PATTERN = re.compile("^([^ ]*)\s*([0-9]*)\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*(.*)$")
-BASH_INPUT_PATTERN = re.compile("^\s*([0-9]*)\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*(.*)$")
+"""The pattern for lines output in the format of:
+<timestamp>        <source>       <description of actionm>"""
+
+BASH_HISTORY_INPUT_PATTERN = re.compile("^([^ ]*)\s*(\"[^\"]*\")?\s*([0-9]*)\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*(.*)$")
+""" The regex pattern for the bash history file input lines, in the expected format of:
+<TTY> "<current-directory>" <history #> YYYY-mm-dd HH:MM:SS <bash command>
+
+So group(1) == TTY
+   group(2) == Current working directory when command is performed, surrounded by \"\"
+   group(3) == bash history number
+   group(4) == timestamp
+   group(5) == bash command"""
+
 UTILS_ACTION_INPUT_PATTERN = re.compile("^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*(.*)(\n?)$")
 
 def find_path():
@@ -67,23 +78,6 @@ def get_chrome_history(for_date=datetime.date.today()):
     return res_lines
 
 
-def reformat_bash_history(line):
-    """
-    Parse the incoming line of bash history into a "standard" format
-
-    Expected incoming format for each line:
-      158  2017-10-02 17:58:14     orca stop
-
-    Expected output format for each line:
-    2017-10-02 17:58:14  bash  158  orca stop
-    """
-    matches = BASH_INPUT_PATTERN.match(line)
-    if len(matches.groups()) > 0:
-        return OUTPUT_FORMAT.format(matches.group(2), "bash", matches.group(1) + "  " + matches.group(3))
-    else:
-        return ""
-
-
 def get_bash_history2(for_date=datetime.date.today()):
     res_lines = []
     date_str = for_date.strftime('%Y-%m-%d')
@@ -92,36 +86,11 @@ def get_bash_history2(for_date=datetime.date.today()):
         file = open(path, 'r')
         for line in file.readlines():
             matches = BASH_HISTORY_INPUT_PATTERN.match(line)
-            res_lines.append(OUTPUT_FORMAT.format(matches.group(3), "bash", matches.group(1) + " " + matches.group(2) + " " + matches.group(4)))
+            if matches:
+                res_lines.append(OUTPUT_FORMAT.format(matches.group(4), "bash", matches.group(1) + " " + matches.group(2) + " " + matches.group(5)))
 
     return list(set(res_lines))
 
-def get_bash_history(for_date=datetime.date.today()):
-    res_lines = []
-    date_str = for_date.strftime('%Y-%m-%d')
-    pattern = re.compile("^ *[0-9]*  {}.*".format(date_str))
-#     cmd = 'bash -i -c "history -r; history"'
-    cmd = 'bash -i -c "history -n; history"'
-#     cmd = 'bash -i -c "history"'
-#     cmd = 'history'
-#     print('date_str: "{}" command: "{}"'.format(date_str, cmd))
-    p = subprocess.Popen(cmd,
-                         stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE,
-                         shell=True)
-    # Read stdout from subprocess until the buffer is empty !
-    for line in iter(p.stdout.readline, b''):
-        if line and pattern.match(line): # Don't print blank lines
-            res_lines.append(reformat_bash_history(line))
-    # This ensures the process has completed, AND sets the 'returncode' attr
-    while p.poll() is None:
-        sleep(.1) #Don't waste CPU-cycles
-    # Empty STDERR buffer
-    err = p.stderr.read()
-    if p.returncode != 0:
-       # The run_command() function is responsible for logging STDERR
-       print("Error: '" + str(err) + "'")
-    return res_lines
 
 def get_todays_file_path(todays_date_str=datetime.date.today().isoformat()):
     return os.path.abspath(os.path.join(os.path.expanduser('~'),
@@ -143,6 +112,7 @@ def skip_existing_contents(expected_filename, todays_date_str, previous_date):
 
         print(line, end='')
     return update_input, is_yesterdays_file, last_line
+
 
 def get_fridays_date(todays_date=datetime.date.today()):
     target_dayofweek = 4  # Friday
@@ -202,6 +172,7 @@ def print_notes_times(fridays_date=get_fridays_date()):
 
     print('\n==============================')
 
+
 def main():
     todays_date_str = datetime.date.today().isoformat()
     yesterdays_date = (datetime.date.today() - datetime.timedelta(1))
@@ -237,4 +208,7 @@ def main():
 
 
 if __name__ == "__main__":
+#     for line in sorted( get_bash_history2(datetime.datetime.now())):
+#         print(line)
+
     main()
