@@ -26,6 +26,8 @@ So group(1) == TTY
    group(5) == bash command"""
 
 UTILS_ACTION_INPUT_PATTERN = re.compile("^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*(.*)(\n?)$")
+NOTE_FILENAME_PATTERN = re.compile("^(\d{4})-(\d{2})-(\d{2})\.txt$")
+NOTE_FILE_LINE_PATTERN = re.compile("^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})(:(\d{2})| [AP]M)\s*(.*)$")
 
 def find_path():
     file_path = os.path.join( os.environ.get("HOME"), 'Library', 'Application Support', 'Google', 'Chrome', 'Profile 1', 'History')
@@ -129,7 +131,7 @@ def get_fridays_date(todays_date=datetime.date.today()):
 
 def is_filename_between_dates(file_path, start_date, end_date):
     parts = NOTE_FILENAME_PATTERN.match(os.path.basename(file_path))
-    return parts and start_date <= datetime.date(int(parts.group(1)), int(parts.group(2)), int(parts.group(3))) <= end_date
+    return parts and start_date <= datetime.datetime(int(parts.group(1)), int(parts.group(2)), int(parts.group(3))) <= end_date
 
 
 def get_file_history(file_path):
@@ -168,7 +170,9 @@ def print_notes_times(fridays_date=get_fridays_date()):
     print('{:<24} End of the week\n\n======= Weeks End Times ========\n'.format(datetime.datetime.now().strftime(DATE_TIME_FORMAT)))
     data = get_notes_history(fridays_date)
     for key in sorted(data.iterkeys()):
-        print('{date:%Y-%m-%d}   {start:%H:%M}   {end:%H:%M}   {period}'.format(**data[key]))
+        val = data[key]
+        end_str = "{end:%H:%M}".format(**val) if val["end"] else "     "
+        print('{:%Y-%m-%d}   {:%H:%M}   {}   {}'.format(val["date"], val["start"], end_str, val["period"]))
 
     print('\n==============================')
 
@@ -202,7 +206,7 @@ def main():
         for line in sorted(all_history):
             print(line)
 
-        if desired_date.weekday == 4:
+        if desired_date.weekday() == 4:
             print_notes_times(desired_date)
         print('\n==============================')
 
@@ -210,5 +214,5 @@ def main():
 if __name__ == "__main__":
 #     for line in sorted( get_bash_history2(datetime.datetime.now())):
 #         print(line)
-
+#     print_notes_times()
     main()
