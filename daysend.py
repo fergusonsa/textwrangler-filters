@@ -13,11 +13,13 @@ import tempfile
 import refreshbooks.api
 import yaml
 import webbrowser
+import lxml.objectify
 
 DATE_TIME_FORMAT = '%Y-%m-%d %H:%M %p'
 OUTPUT_FORMAT = "{:19}  {:15}  {}"
 """The pattern for lines output in the format of:
 <timestamp>        <source>       <description of actionm>"""
+
 
 BASH_HISTORY_INPUT_PATTERN = re.compile("^([^ ]*)\s*(\"[^\"]*\")?\s*([0-9]*)\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*(.*)$")
 """ The regex pattern for the bash history file input lines, in the expected format of:
@@ -36,17 +38,25 @@ NOTE_FILE_LINE_PATTERN = re.compile("^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})(:(
 END_OF_WEEK_DAY = 4
 
 def get_config():
-    cfg_file_path = os.path.join( os.environ.get("HOME"), ".tracker", "config.cfg")
+    """ IN PROGRESS """
+    cfg_file_path = os.path.join( os.environ.get('HOME'), ".tracker", "config.cfg")
 
-def find_path():
-    file_path = os.path.join( os.environ.get("HOME"), 'Library', 'Application Support', 'Google', 'Chrome', 'Profile 1', 'History')
-    temp_dir = tempfile.gettempdir()
+
+def get_chrome_history_copy_path():
+    """ Creates a copy of the history file for the first profile of Google Chrome in a newly
+    created temporary directory and returns the path. Note that it will not find any other
+    profile.
+    """
+    file_path = os.path.join(os.environ.get('HOME'), 'Library', 'Application Support',
+                             'Google', 'Chrome', 'Profile 1', 'History')
+    temp_dir = tempfile.mkdtemp()
     temp_path = os.path.join(temp_dir, 'temp_file_name')
     shutil.copy2(file_path, temp_path)
     return temp_path
 
 
 def cleanup(file_path):
+
     shutil.rmtree(os.path.dirname(file_path), ignore_errors=True)
 
 
@@ -58,13 +68,14 @@ def get_utils_actions(for_date=None):
     if for_date is None:
         for_date=datetime.date.today()
     date_str = for_date.strftime('%Y%m%d')
-    path = os.path.join(os.environ.get("HOME"), "reports", "action-logs", "action-log-{}.txt".format(date_str))
+    path = os.path.join(os.environ.get('HOME'), 'reports', 'action-logs',
+                        'action-log-{}.txt'.format(date_str))
     if os.path.isfile(path):
         file = open(path, 'r')
         res_lines = []
         for line in file.readlines():
             matches = UTILS_ACTION_INPUT_PATTERN.match(line)
-            res_lines.append(OUTPUT_FORMAT.format(matches.group(1), "Utils Action", matches.group(2)))
+            res_lines.append(OUTPUT_FORMAT.format(matches.group(1), 'Utils Action', matches.group(2)))
         return res_lines
     else:
         return []
@@ -74,11 +85,11 @@ def get_chrome_history(for_date=None):
     if for_date is None:
         for_date=datetime.date.today()
 
-    history_file_path = find_path()
+    history_file_path = get_chrome_history_copy_path()
     allrows = None
     date_str = for_date.strftime('%Y-%m-%d')
     try:
-        con = sqlite3.connect(find_path()) #Connect to the database
+        con = sqlite3.connect(history_file_path) #Connect to the database
         con.text_factory = str
         c = con.cursor()
 
@@ -89,7 +100,7 @@ def get_chrome_history(for_date=None):
         cleanup(history_file_path)
     res_lines = []
     for line in allrows:
-        res_lines.append(OUTPUT_FORMAT.format(line[0], "Chrome", line[1] + ' ' + line[2]))
+        res_lines.append(OUTPUT_FORMAT.format(line[0], 'Chrome', line[1] + ' ' + line[2]))
     return res_lines
 
 
@@ -98,13 +109,13 @@ def get_bash_history2(for_date=None):
         for_date=datetime.date.today()
     res_lines = []
     date_str = for_date.strftime('%Y-%m-%d')
-    path = os.path.join(os.environ.get("HOME"), "reports", "bash_history", "bash_history-{}.txt".format(date_str))
+    path = os.path.join(os.environ.get('HOME'), "reports", "bash_history", "bash_history-{}.txt".format(date_str))
     if os.path.isfile(path):
         file = open(path, 'r')
         for line in file.readlines():
             matches = BASH_HISTORY_INPUT_PATTERN.match(line)
             if matches:
-                res_lines.append(OUTPUT_FORMAT.format(matches.group(4), "bash", matches.group(1) + " " + matches.group(2) + " " + matches.group(5)))
+                res_lines.append(OUTPUT_FORMAT.format(matches.group(4), 'bash', matches.group(1) + ' ' + matches.group(2) + ' ' + matches.group(5)))
 
     return list(set(res_lines))
 
@@ -127,10 +138,16 @@ def skip_existing_contents(expected_filename, todays_date_str, previous_date):
         if fileinput.isfirstline():
             # Check the start of the first line to make sure that it has today's date
             update_input = line.startswith(todays_date_str)
+            parts = NOTE_FILE_LINE_PATTERN.match(line)
+            if parts:
+                start_timestamp = datetime.datetime(int(parts.group(1)), int(parts.group(2)), int(parts.group(3)),
+                                              int(parts.group(4)), int(parts.group(5)))
+            else:
+                start_timestamp = None
             is_yesterdays_file = line.startswith(previous_date.isoformat())
 
         print(line, end='')
-    return update_input, is_yesterdays_file, last_line
+    return update_input, is_yesterdays_file, last_line, start_timestamp
 
 
 def get_end_of_week_date(todays_date=None):
@@ -175,11 +192,12 @@ def get_file_history(file_path):
     if file_date.date() == datetime.date.today() and (last_timestamp is None or datetime.datetime.now() > last_timestamp):
         last_timestamp = datetime.datetime.now()
 
-    return {"date": file_date,
+    return {"date": file_date.date(),
             "filepath": file_path,
             "start": first_timestamp,
             "end": last_timestamp,
             "period": last_timestamp - first_timestamp if last_timestamp and first_timestamp else None}
+
 
 
 def get_notes_history(end_date=None):
@@ -209,6 +227,7 @@ def print_notes_times(end_of_week_date=None, hours_data=None):
         print('{:%Y-%m-%d}   {:%H:%M}   {}   {}'.format(val["date"], val["start"], end_str, val["period"]))
     print("Total Hours: {}".format(total_hours))
 
+
 def get_timesheet_config():
     file_path = os.path.abspath(os.path.join(os.path.expanduser('~'),
                                             '.ssh', 'identity.yaml'))
@@ -216,10 +235,25 @@ def get_timesheet_config():
     config = yaml.load(stream)
     return config
 
-def daterange(start_date, end_date):
-    for n in range(int ((end_date - start_date).days)):
-        yield start_date + datetime.timedelta(n)
+def create_freshbooks_client(config=None):
+    if config is None:
+        config = get_timesheet_config()
+    return refreshbooks.api.TokenClient(config['freshbooks']['api']['url'],
+                                        config['freshbooks']['api']['secret'],
+                                        user_agent=config['freshbooks']['api']['user-agent'])
 
+
+"""
+from daysend import *
+end_of_week_date = get_end_of_week_date()
+hours = get_notes_history()
+config = get_timesheet_config()
+c = create_freshbooks_client(config)
+
+update_freshbooks_timesheet(end_of_week_date, hours)
+prep_timesheets(hours, end_of_week_date)
+
+"""
 def update_freshbooks_timesheet(end_of_week_date=None, hours_data=None, config=None):
     if end_of_week_date is None:
         end_of_week_date = get_end_of_week_date()
@@ -228,31 +262,41 @@ def update_freshbooks_timesheet(end_of_week_date=None, hours_data=None, config=N
     if config is None:
         config = get_timesheet_config()
 
-    print(config)
 #     example source http://pydoc.net/clifresh/5/clifresh/
     c = refreshbooks.api.TokenClient(config['freshbooks']['api']['url'],
                                      config['freshbooks']['api']['secret'],
                                      user_agent=config['freshbooks']['api']['user-agent'])
     project_name = config['current-project']
+    project_id = config[project_name]['freshbooks']['project-id']
+    task_id = config[project_name]['freshbooks']['task-id']
+    hours_per_day = config[project_name]['daily-hours']
+    task_list = c.task.list(project_id=project_id)
 
-    p = c.project.list()
-    pr = p.projects.project
-    task_list = c.task.list(project_id=pr.project_id)
-#     task_list.tasks.task.task_id
-#     tes = c.time_entry.list(project_id=pr.project_id, date_from='2017-11-18', date_to='2017-11-24')
-#     for te in tes.time_entries.time_entry:
-#         print(te.date, te.hours, te.billed)
-    daily_hours = config[project_name]['daily-hours']
-    if isinstance(daily_hours, numbers.Number):
+    week_start_date = end_of_week_date - datetime.timedelta(days=6)
+    tes = c.time_entry.list(project_id=project_id, date_from=week_start_date.isoformat(), date_to=end_of_week_date.isoformat())
+    if tes.time_entries.get('total') != '0':
+        print('Existing time entries between {} and {}'.format(week_start_date.isoformat(), end_of_week_date.isoformat()))
+        for te in tes.time_entries.time_entry:
+            print(te.date, te.hours, te.billed)
+    if isinstance(hours_per_day, numbers.Number):
         for day in hours_data.itervalues():
-            t_resp = c.time_entry.create(time_entry={"date": day['date'].isoformat(),
-                                                     "project_id": pr.project_id,
-                                                     "task_id": task_list.tasks.task.task_id,
-                                                     "hours": daily_hours})
+            if tes.time_entries.get('total') != '0':
+                tentry = [te for te in tes.time_entries.time_entry if te.date == day['date'].date().isoformat()]
+            else:
+                tentry = None
+            if not tentry:
+                print('Creating time entry for {} project id: {} task id: {} hours: {}'.format(day['date'].isoformat(), project_id, task_id, hours_per_day))
+                t_resp = c.time_entry.create(time_entry={'date': day['date'].isoformat(),
+                                                         'project_id': project_id,
+                                                         'task_id': task_id,
+                                                         'hours': hours_per_day})
+            else:
+                print('Already a time entry of {} hours for {}'.format(tentry[0].hours, tentry[0].date))
     else:
         print('Cannot handle non-numeric project daily-hours config setting yet!')
 
-def prep_timesheets_invoice(hours, end_of_week_date=None, config=None):
+
+def prep_timesheets(hours, end_of_week_date=None, config=None):
     if end_of_week_date is None:
         end_of_week_date = get_end_of_week_date()
     if config is None:
@@ -261,17 +305,144 @@ def prep_timesheets_invoice(hours, end_of_week_date=None, config=None):
     for ts in config[project]['timesheets']:
         webbrowser.open(ts['url'])
     webbrowser.open(config['freshbooks']['login-url'])
-    new_filename = os.path.abspath(os.path.join(os.path.expanduser('~'),
+    new_filename = os.path.abspath(os.path.join(os.environ.get('HOME'),
                                                 'notes',
                                                 'Flex Contractor - Weekly Project Tracking Sheet {} Scott Ferguson.docx'.format(
                                                     end_of_week_date.isoformat())))
-    previous_filename = os.path.abspath(os.path.join(os.path.expanduser('~'),
+    previous_filename = os.path.abspath(os.path.join(os.environ.get('HOME'),
                                                      'notes',
                                                      'Flex Contractor - Weekly Project Tracking Sheet {} Scott Ferguson.docx'.format(
                                                          (end_of_week_date - datetime.timedelta(weeks=1)).isoformat())))
-    if not os.path.exists(new_filename):
-        shutil.copy2(previous_filename, new_filename)
-    os.system("open {}".format(new_filename))
+    if not os.path.exists(previous_filename):
+        print('The file "{}" does not exist as expected!'.format(previous_filename, new_filename))
+    else:
+        if not os.path.exists(new_filename):
+            print('Copying "{}" to "{}"'.format(previous_filename, new_filename))
+            shutil.copy2(previous_filename, new_filename)
+        else:
+            print('The new file "{}" already exists!'.format(new_filename))
+        os.system('open "{}"'.format(new_filename))
+
+
+def get_month_first_date(dtDateTime):
+    """From http://code.activestate.com/recipes/476197-first-last-day-of-the-month/ """
+    #what is the first day of the current month
+    ddays = int(dtDateTime.strftime("%d"))-1 #days to subtract to get to the 1st
+    delta = datetime.timedelta(days= ddays)  #create a delta datetime object
+    return dtDateTime - delta
+
+
+def get_month_last_date(dtDateTime):
+    """From http://code.activestate.com/recipes/476197-first-last-day-of-the-month/ """
+    dYear = dtDateTime.strftime("%Y")        #get the year
+    dMonth = str(int(dtDateTime.strftime("%m"))%12+1)#get next month, watch rollover
+    dDay = "1"                               #first day of next month
+    nextMonth = mkDateTime("%s-%s-%s"%(dYear,dMonth,dDay))#make a datetime obj for 1st of next month
+    delta = datetime.timedelta(seconds=1)    #create a delta of 1 second
+    return nextMonth - delta                 #subtract from nextMonth and return
+
+
+def create_invoice(end_of_week_date=None, config=None):
+    if end_of_week_date is None:
+        end_of_week_date = get_end_of_week_date()
+    if config is None:
+        config = get_timesheet_config()
+
+    project_name = config['current-project']
+    if config[project_name]['invoice-frequency'] == 'weekly':
+        end_date = get_end_of_week_date()
+        start_date = end_date - datetime.timedelta(days=6)
+    elif config[project_name]['invoice-frequency'] == 'monthly':
+        end_date = get_month_last_date(get_end_of_week_date())
+        start_date = get_month_first_date(end_date)
+
+    c = refreshbooks.api.TokenClient(config['freshbooks']['api']['url'],
+                                     config['freshbooks']['api']['secret'],
+                                     user_agent=config['freshbooks']['api']['user-agent'])
+    project_id = config[project_name]['freshbooks']['project-id']
+    client_id = config[project_name]['freshbooks']['client-id']
+    # Get the task details to help fill out the lines of the invoice
+    tsk = c.task.get(task_id=config[project_name]['freshbooks']['task-id'])
+    # Get the list of time entries to add to the invoice
+    tes = c.time_entry.list(project_id=project_id,
+                            date_from=start_date.isoformat(),
+                            date_to=end_date.isoformat())
+    if tes.time_entries.get('total') != '0':
+        # Check the number of unbilled hours to be added to the invoice
+        num_hours = sum([int(te.hours) for te in tes.time_entries.time_entry if te.billed == '0'])
+        if num_hours > 0:
+#             if num_hours !=
+            # Create the invoice to add lines to.
+            response = c.invoice.create(invoice=dict(client_id=client-id))
+            invoice_response = c.invoice.get(invoice_id=response.invoice_id)
+
+            print("New invoice created: #{} (id {})".format(invoice_response.invoice.number,
+                                                            invoice_response.invoice.invoice_id))
+            tasks_details = {config[project_name]['freshbooks']['task-id']: tsk}
+            for te in tes.time_entries.time_entry:
+                if te.billed == '0':
+                    tsk = tasks_details[te.task_id]
+                    added = c.invoice.lines.add(invoice_id=invoice_response.invoice.invoice_id,
+                                                lines=[refreshbooks.api.types.line(name=tsk.name,
+                                                                                   unit_cost=tsk.rate,
+                                                                                   quantity=te.hours,
+                                                                                   amount=(tsk.rate * hours),
+                                                                                   tax1_name='HST',
+                                                                                   tax1_percent=13)])
+                    # Mark the time entry as billed
+        else:
+            print('No unbilled time entries to add to an invoice between the dates {} and {}'.format(start_date.isoformat(), end_date.isoformat()))
+    else:
+        print('No time entries to add to an invoice between the dates {} and {}'.format(start_date.isoformat(), end_date.isoformat()))
+"""
+          <amount>40</amount>
+          <name>Yard work</name>
+
+          <unit_cost>10</unit_cost>
+          <quantity>4</quantity>
+          <tax1_name>GST</tax1_name>
+          <tax2_name>PST</tax2_name>
+          <tax1_percent>5</tax1_percent>
+          <tax2_percent>8</tax2_percent>
+          <type>Item</type>
+"""
+
+
+def prepare_timesheets_main(hours_data=None, week_end_date=None):
+    if hours_data is None:
+        hours_data = get_notes_history(end_of_week_date)
+    if week_end_date is None:
+        week_end_date = datetime.date.today()
+
+
+def timestamp_main():
+    todays_date_str = datetime.date.today().isoformat()
+    update_input = True
+    expected_filename = get_todays_file_path()
+
+    if not os.path.exists(expected_filename):
+        with open(expected_filename, mode='w') as newfile:
+            newfile.write('{:<24}Arrived and logged in\n'.format(datetime.datetime.now().strftime(DATE_TIME_FORMAT)))
+        os.system('open {}'.format(expected_filename))
+        update_input = False
+
+    last_line = ''
+    for line in fileinput.input():
+        last_line = line
+        if fileinput.isfirstline():
+            # Check the start of the first line to make sure that it has today's date
+            update_input = line.startswith(todays_date_str)
+        print(line, end='')
+    if update_input:
+        if not last_line.endswith(os.linesep):
+            print('')
+        print('{:<24}'.format(datetime.datetime.now().strftime(DATE_TIME_FORMAT)), end='')
+
+
+def weeks_end_main(week_end_date=None):
+    if week_end_date is None:
+        week_end_date = datetime.date.today()
+    print_notes_times(desired_date)
 
 
 def days_end_main():
@@ -282,7 +453,7 @@ def days_end_main():
     is_yesterdays_file = False
     expected_filename = get_todays_file_path()
 
-    (update_input, is_yesterdays_file, last_line) = skip_existing_contents(expected_filename,
+    (update_input, is_yesterdays_file, last_line, start_timestamp) = skip_existing_contents(expected_filename,
                                                                            todays_date_str,
                                                                            yesterdays_date)
 
@@ -294,7 +465,8 @@ def days_end_main():
     if update_input or (is_yesterdays_file and last_line != "==============================\n"):
         if not last_line.endswith(os.linesep):
             print('')
-        print('{:<24} Leaving for the day\n\n'.format(desired_date.strftime(DATE_TIME_FORMAT)), end='')
+        print('{:<24}Leaving for the day, Hours for today: {}\n'.format(desired_date.strftime(DATE_TIME_FORMAT), datetime.datetime.now() - start_timestamp))
+
         all_history = get_chrome_history(desired_date)
         all_history.extend(get_utils_actions(desired_date))
         all_history.extend(get_bash_history2(desired_date))

@@ -12,7 +12,7 @@ import pyrfc3339
 import datetime
 import decimal
 import itertools
-
+import pprettyprinter
 
 class BaseClass(edn_format.TaggedElement):
     def __init__(self, classtype):
@@ -199,9 +199,11 @@ def get_edn_obj_from_string(string_of_edn):
 def print_edn_format(string_to_format):
     new_object = get_edn_obj_from_string(string_to_format)
     print('-----done------')
-    print(edn_format.dumps(new_object, sort_keys=True).encode('utf-8'))
-    print('-----print------')
-    print_edn(new_object)
+#     print(edn_format.dumps(new_object, sort_keys=True).encode('utf-8'))
+#     print('-----print------')
+#     print_edn(new_object)
+#     print('-----------')
+    prettyprinter.pprint(new_object)
     print('-----------')
 
 def load_file(path):
