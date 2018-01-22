@@ -2,18 +2,27 @@
 from __future__ import print_function
 import datetime
 import fileinput
+import httplib2
+import lxml.objectify
 import numbers
 import os
 import os.path
 import re
+import refreshbooks.api
 import shutil
 import sqlite3
+import string
 import subprocess
+import sys
 import tempfile
-import refreshbooks.api
-import yaml
+import traceback
 import webbrowser
-import lxml.objectify
+import yaml
+
+from apiclient import discovery
+from oauth2client import client
+from oauth2client import tools
+from oauth2client.file import Storage
 
 DATE_TIME_FORMAT = '%Y-%m-%d %H:%M %p'
 OUTPUT_FORMAT = "{:19}  {:15}  {}"
@@ -36,6 +45,127 @@ NOTE_FILENAME_PATTERN = re.compile("^(\d{4})-(\d{2})-(\d{2})\.txt$")
 NOTE_FILE_LINE_PATTERN = re.compile("^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})(:(\d{2})| [AP]M)\s*(.*)$")
 
 END_OF_WEEK_DAY = 4
+
+# If modifying these scopes, delete your previously saved credentials
+# at ~/.credentials/calendar-python-quickstart.json
+SCOPES = 'https://www.googleapis.com/auth/calendar.readonly'
+CLIENT_SECRET_FILE = '/Users/fergusonsa/.credentials/client_secret.json'
+APPLICATION_NAME = 'Google Calendar API Python Quickstart'
+DATETIME_FORMAT = '%Y-%m-%dT%H:%M:%S-%HH:%MM'
+
+
+class DeltaTemplate(string.Template):
+    delimiter = "%"
+
+
+def timedelta_format(tdelta, fmt):
+    """ adapted from https://stackoverflow.com/questions/8906926/formatting-python-timedelta-objects
+
+    """
+    data = {'D': tdelta.days}
+    data['H'], rem = divmod(tdelta.seconds, 3600)
+    data['M'], data['S'] = divmod(rem, 60)
+
+    if '%D'not in fmt:
+        data['H'] += 24 * data['D']
+    if '%H'not in fmt:
+        data['M'] += 60 * data['H']
+    if '%M'not in fmt:
+        data['S'] += 60 * data['M']
+
+    t = DeltaTemplate(fmt)
+    return t.substitute(**data)
+
+
+def parse_isoformat_datetime(dt_str):
+#     conformed_timestamp = re.sub(r"[:]|([-](?!((\d{2}[:]\d{2})|(\d{4}))$))", '', dt_str)
+#     return datetime.datetime.strptime(conformed_timestamp, "%Y%m%dT%H%M%S.%f" )
+    # this regex removes all colons and all
+    # dashes EXCEPT for the dash indicating + or - utc offset for the timezone
+    conformed_timestamp = re.sub(r"[:]|([-](?!((\d{2}[:]\d{2})|(\d{4}))$))", '', dt_str)
+
+    # split on the offset to remove it. use a capture group to keep the delimiter
+    split_timestamp = re.split(r"[+|-]",conformed_timestamp)
+    main_timestamp = split_timestamp[0]
+    if len(split_timestamp) == 3:
+        sign = split_timestamp[1]
+        offset = split_timestamp[2]
+    else:
+        sign = None
+        offset = None
+
+    # generate the datetime object without the offset at UTC time
+    output_datetime = datetime.datetime.strptime(main_timestamp +"Z", "%Y%m%dT%H%M%SZ" )
+    if offset:
+        # create timedelta based on offset
+        offset_delta = datetime.timedelta(hours=int(sign+offset[:-2]), minutes=int(sign+offset[-2:]))
+        # offset datetime with timedelta
+        output_datetime = output_datetime + offset_delta
+    return output_datetime
+
+
+def get_credentials():
+    """Gets valid user credentials from storage.
+
+    If nothing has been stored, or if the stored credentials are invalid,
+    the OAuth2 flow is completed to obtain the new credentials.
+
+    Returns:
+        Credentials, the obtained credential.
+    """
+    home_dir = os.path.expanduser('~')
+    credential_dir = os.path.join(home_dir, '.credentials')
+    if not os.path.exists(credential_dir):
+        os.makedirs(credential_dir)
+    credential_path = os.path.join(credential_dir,
+                                   'calendar-python-quickstart.json')
+
+    store = Storage(credential_path)
+    credentials =  store.get()
+    if not credentials or credentials.invalid:
+        print('did not get credentials via {}'.format(credential_path))
+        flow = client.flow_from_clientsecrets(CLIENT_SECRET_FILE, SCOPES)
+        flow.user_agent = APPLICATION_NAME
+        if flags:
+            credentials = tools.run_flow(flow, store, flags)
+        else: # Needed only for compatibility with Python 2.6
+            credentials = tools.run(flow, store)
+        print('Storing credentials to ' + credential_path)
+    return credentials
+
+
+def get_google_calendar_events_for_day(creds=None, http=None, service=None, dt=None):
+    if not creds:
+        creds = get_credentials()
+    if not http:
+        http = credentials.authorize(httplib2.Http())
+    if not service:
+        service = discovery.build('calendar', 'v3', http=http)
+    if not dt:
+        dt = datetime.datetime.today()
+
+    st_of_day = datetime.datetime.combine(dt.date(), datetime.time())
+    end_of_day = st_of_day + datetime.timedelta(days=1)
+
+    eventsResult = service.events().list(
+        calendarId='primary', timeMin=st_of_day.isoformat() + 'Z', timeMax=end_of_day.isoformat() + 'Z', singleEvents=True,
+        orderBy='startTime').execute()
+    return eventsResult.get('items', [])
+
+
+def print_google_calendar_events(events, output=sys.stdout):
+    if not events:
+        output.write('No upcoming events found.\n')
+    else:
+        for event in events:
+            start = parse_isoformat_datetime(event['start'].get('dateTime', event['start'].get('date')))
+            end = event['end'].get('dateTime', event['end'].get('date'))
+            length = parse_isoformat_datetime(end) - start
+            output.write('{:<24} {} {} {}\n'.format(start.strftime(daysend.DATE_TIME_FORMAT),
+                                                    event['summary'],
+                                                    timedelta_format(length, '%H hours %M minutes'),
+                                                    event['location']))
+
 
 def get_config():
     """ IN PROGRESS """
@@ -199,7 +329,6 @@ def get_file_history(file_path):
             "period": last_timestamp - first_timestamp if last_timestamp and first_timestamp else None}
 
 
-
 def get_notes_history(end_date=None):
     if end_date is None:
         end_date=get_end_of_week_date()
@@ -235,6 +364,7 @@ def get_timesheet_config():
     config = yaml.load(stream)
     return config
 
+
 def create_freshbooks_client(config=None):
     if config is None:
         config = get_timesheet_config()
@@ -251,6 +381,7 @@ config = get_timesheet_config()
 c = create_freshbooks_client(config)
 
 update_freshbooks_timesheet(end_of_week_date, hours)
+create_invoice(end_of_week_date, config)
 prep_timesheets(hours, end_of_week_date)
 
 """
@@ -356,42 +487,46 @@ def create_invoice(end_of_week_date=None, config=None):
         end_date = get_month_last_date(get_end_of_week_date())
         start_date = get_month_first_date(end_date)
 
-    c = refreshbooks.api.TokenClient(config['freshbooks']['api']['url'],
-                                     config['freshbooks']['api']['secret'],
-                                     user_agent=config['freshbooks']['api']['user-agent'])
+    c = create_freshbooks_client(config)
+
     project_id = config[project_name]['freshbooks']['project-id']
     client_id = config[project_name]['freshbooks']['client-id']
     # Get the task details to help fill out the lines of the invoice
-    tsk = c.task.get(task_id=config[project_name]['freshbooks']['task-id'])
+    default_tsk = c.task.get(task_id=config[project_name]['freshbooks']['task-id'])
     # Get the list of time entries to add to the invoice
     tes = c.time_entry.list(project_id=project_id,
                             date_from=start_date.isoformat(),
                             date_to=end_date.isoformat())
     if tes.time_entries.get('total') != '0':
         # Check the number of unbilled hours to be added to the invoice
-        num_hours = sum([int(te.hours) for te in tes.time_entries.time_entry if te.billed == '0'])
+        print("list of hours: ", [float(te.hours.text) for te in tes.time_entries.time_entry if te.billed.text == '0'])
+        num_hours = sum([float(te.hours.text) for te in tes.time_entries.time_entry if te.billed.text == '0'])
+        print("num_hours: {}".format(num_hours))
         if num_hours > 0:
 #             if num_hours !=
             # Create the invoice to add lines to.
-            response = c.invoice.create(invoice=dict(client_id=client-id))
+            response = c.invoice.create(invoice=dict(client_id=client_id))
             invoice_response = c.invoice.get(invoice_id=response.invoice_id)
 
             print("New invoice created: #{} (id {})".format(invoice_response.invoice.number,
                                                             invoice_response.invoice.invoice_id))
-            tasks_details = {config[project_name]['freshbooks']['task-id']: tsk}
+            tasks_details = {config[project_name]['freshbooks']['task-id']: default_tsk}
             for te in tes.time_entries.time_entry:
-                if te.billed == '0':
+                if te.billed.text == '0':
                     tsk = tasks_details[te.task_id]
                     added = c.invoice.lines.add(invoice_id=invoice_response.invoice.invoice_id,
-                                                lines=[refreshbooks.api.types.line(name=tsk.name,
-                                                                                   unit_cost=tsk.rate,
+                                                lines=[refreshbooks.api.types.line(name=tsk.task.name,
+                                                                                   unit_cost=tsk.task.rate,
                                                                                    quantity=te.hours,
-                                                                                   amount=(tsk.rate * hours),
+                                                                                   amount=(tsk.task.rate * hours),
                                                                                    tax1_name='HST',
                                                                                    tax1_percent=13)])
                     # Mark the time entry as billed
         else:
             print('No unbilled time entries to add to an invoice between the dates {} and {}'.format(start_date.isoformat(), end_date.isoformat()))
+            for te in tes.time_entries.time_entry:
+                print(te.date, te.hours, te.billed, float(te.hours.text))
+
     else:
         print('No time entries to add to an invoice between the dates {} and {}'.format(start_date.isoformat(), end_date.isoformat()))
 """
@@ -408,13 +543,6 @@ def create_invoice(end_of_week_date=None, config=None):
 """
 
 
-def prepare_timesheets_main(hours_data=None, week_end_date=None):
-    if hours_data is None:
-        hours_data = get_notes_history(end_of_week_date)
-    if week_end_date is None:
-        week_end_date = datetime.date.today()
-
-
 def timestamp_main():
     todays_date_str = datetime.date.today().isoformat()
     update_input = True
@@ -423,6 +551,9 @@ def timestamp_main():
     if not os.path.exists(expected_filename):
         with open(expected_filename, mode='w') as newfile:
             newfile.write('{:<24}Arrived and logged in\n'.format(datetime.datetime.now().strftime(DATE_TIME_FORMAT)))
+            events = get_google_calendar_events_for_day(credentials, http, service)
+            print_google_calendar_events(events, newfile)
+
         os.system('open {}'.format(expected_filename))
         update_input = False
 
@@ -439,10 +570,18 @@ def timestamp_main():
         print('{:<24}'.format(datetime.datetime.now().strftime(DATE_TIME_FORMAT)), end='')
 
 
-def weeks_end_main(week_end_date=None):
-    if week_end_date is None:
-        week_end_date = datetime.date.today()
-    print_notes_times(desired_date)
+def weeks_end_main(end_of_week_date=None):
+    """ IN PROGRESS"""
+    if end_of_week_date is None:
+        end_of_week_date = get_end_of_week_date()
+
+    hours = get_notes_history()
+    config = get_timesheet_config()
+
+    print_notes_times(desired_date, hours)
+    update_freshbooks_timesheet(end_of_week_date, hours)
+    create_invoice(end_of_week_date, config)
+    prep_timesheets(hours, end_of_week_date)
 
 
 def days_end_main():
