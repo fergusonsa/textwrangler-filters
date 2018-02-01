@@ -18,6 +18,7 @@ import tempfile
 import traceback
 import webbrowser
 import yaml
+import glob 
 
 from apiclient import discovery
 from oauth2client import client
@@ -185,9 +186,37 @@ def get_chrome_history_copy_path():
     return temp_path
 
 
-def cleanup(file_path):
+def get_chrome_history_copy_paths(for_date=None):
+    """ Creates a copy of the history file for the first profile of Google Chrome in a newly
+    created temporary directory and returns the path. Note that it will not find any other
+    profile.
+    """
+    if not for_date:
+        for_date = datetime.date.today()
+    paths = []
+    user_path = os.path.join(os.environ.get('HOME'), 'Library', 'Application Support',
+                             'Google', 'Chrome')
+    temp_dir = tempfile.mkdtemp()
+    for_date_midnight_timestamp = datetime.datetime.combine(for_date, datetime.datetime.min.time())
+    for file in glob.glob(user_path + '/*/History'):
+        mod_file_timestamp = datetime.datetime.fromtimestamp(os.path.getmtime(file))
+        if mod_file_timestamp > for_date_midnight_timestamp:
+            profile_name = os.path.basename(os.path.dirname(file))
+            temp_path = os.path.join(temp_dir, profile_name + '_History')
+            shutil.copy2(file, temp_path)
+            paths.append(temp_path)
+    return paths
 
-    shutil.rmtree(os.path.dirname(file_path), ignore_errors=True)
+
+def cleanup(dir_path):
+    if os.path.isfile(dir_path):    
+        dir_path = os.path.dirname(dir_path)
+    if os.path.exists(dir_path) and dir_path != os.path.expanduser('~') and dir_path != '/':
+#         print('Deleting files in {}'.format(dir_path))
+        shutil.rmtree(dir_path)
+#         shutil.rmtree(dir_path, ignore_errors=True)
+#     else:
+#         print('NOT DELETING FILES IN {}'.format(dir_path))
 
 
 def get_utils_actions(for_date=None):
@@ -200,37 +229,48 @@ def get_utils_actions(for_date=None):
     date_str = for_date.strftime('%Y%m%d')
     path = os.path.join(os.environ.get('HOME'), 'reports', 'action-logs',
                         'action-log-{}.txt'.format(date_str))
+    res_lines = []
     if os.path.isfile(path):
         file = open(path, 'r')
-        res_lines = []
         for line in file.readlines():
             matches = UTILS_ACTION_INPUT_PATTERN.match(line)
             res_lines.append(OUTPUT_FORMAT.format(matches.group(1), 'Utils Action', matches.group(2)))
-        return res_lines
-    else:
-        return []
+    return res_lines
 
 
 def get_chrome_history(for_date=None):
     if for_date is None:
         for_date=datetime.date.today()
 
-    history_file_path = get_chrome_history_copy_path()
-    allrows = None
-    date_str = for_date.strftime('%Y-%m-%d')
-    try:
-        con = sqlite3.connect(history_file_path) #Connect to the database
-        con.text_factory = str
-        c = con.cursor()
-
-        rows = c.execute('select datetime(last_visit_time/1000000-11644473600, "unixepoch", "localtime"),title, url from urls where datetime(last_visit_time/1000000-11644473600,"unixepoch", "localtime") >= datetime("' + date_str + 'T00:00") order by last_visit_time desc')
-        allrows = rows.fetchall()
-        con.close()
-    finally:
-        cleanup(history_file_path)
+    history_file_paths = get_chrome_history_copy_paths(for_date)
+#     print(history_file_paths)
+    allrows = []
     res_lines = []
-    for line in allrows:
-        res_lines.append(OUTPUT_FORMAT.format(line[0], 'Chrome', line[1] + ' ' + line[2]))
+    date_str = for_date.isoformat()
+    next_date_str = (for_date + datetime.timedelta(days=1)).isoformat()
+#     print('date_str: {}   next_date_str: {}'.format(date_str, next_date_str))
+    for history_file_path in history_file_paths:
+        try:
+            con = sqlite3.connect(history_file_path) #Connect to the database
+            con.text_factory = str
+            c = con.cursor()
+            rows = c.execute("""select datetime(last_visit_time/1000000-11644473600,
+                                "unixepoch", "localtime"),title, url 
+                                from urls 
+                                where datetime(last_visit_time/1000000-11644473600,"unixepoch", "localtime") >= datetime("{}T00:00")
+                                and datetime(last_visit_time/1000000-11644473600,"unixepoch", "localtime") < datetime("{}T00:00")
+                                order by last_visit_time desc""".format(date_str, next_date_str))
+            allrows = rows.fetchall()
+#             print(len(allrows))
+            con.close()
+            for line in allrows:
+                res_lines.append(OUTPUT_FORMAT.format(line[0], 'Chrome', line[1] + ' ' + line[2]))
+        except:
+            e = sys.exc_info()
+            print('\nEXCEPTION trying to get google history from {}! {} \n{} \n{}'.format(history_file_path, e[0], e[1], e[2]))
+
+    if len(history_file_paths) > 0:
+        cleanup(history_file_paths[0])
     return res_lines
 
 
@@ -239,14 +279,18 @@ def get_bash_history2(for_date=None):
         for_date=datetime.date.today()
     res_lines = []
     date_str = for_date.strftime('%Y-%m-%d')
-    path = os.path.join(os.environ.get('HOME'), "reports", "bash_history", "bash_history-{}.txt".format(date_str))
+    path = os.path.join(os.environ.get('HOME'), 
+                        "reports", 
+                        "bash_history", 
+                        "bash_history-{}.txt".format(date_str))
     if os.path.isfile(path):
         file = open(path, 'r')
         for line in file.readlines():
             matches = BASH_HISTORY_INPUT_PATTERN.match(line)
             if matches:
-                res_lines.append(OUTPUT_FORMAT.format(matches.group(4), 'bash', matches.group(1) + ' ' + matches.group(2) + ' ' + matches.group(5)))
-
+                res_lines.append(OUTPUT_FORMAT.format(matches.group(4), 
+                                                      'bash', 
+                                                      matches.group(1) + ' ' + matches.group(2) + ' ' + matches.group(5)))
     return list(set(res_lines))
 
 
@@ -353,11 +397,14 @@ def print_notes_times(end_of_week_date=None, hours_data=None):
         val = hours_data[key]
         total_hours += val["period"]
         end_str = "{end:%H:%M}".format(**val) if val["end"] else "     "
-        print('{:%Y-%m-%d}   {:%H:%M}   {}   {}'.format(val["date"], val["start"], end_str, val["period"]))
-    print("Total Hours: {}".format(total_hours))
+        print('{:%Y-%m-%d}   {:%H:%M}   {}   {}'.format(val["date"], val["start"], end_str, 
+                                                        timedelta_format(val["period"], '%H hours %M minutes')))
+    print("Total Hours: {}".format(timedelta_format(total_hours, '%H hours %M minutes')))
 
 
 def get_timesheet_config():
+    """
+    """
     file_path = os.path.abspath(os.path.join(os.path.expanduser('~'),
                                             '.ssh', 'identity.yaml'))
     stream = file(file_path, 'r')
@@ -394,9 +441,7 @@ def update_freshbooks_timesheet(end_of_week_date=None, hours_data=None, config=N
         config = get_timesheet_config()
 
 #     example source http://pydoc.net/clifresh/5/clifresh/
-    c = refreshbooks.api.TokenClient(config['freshbooks']['api']['url'],
-                                     config['freshbooks']['api']['secret'],
-                                     user_agent=config['freshbooks']['api']['user-agent'])
+    c = create_freshbooks_client(config)
     project_name = config['current-project']
     project_id = config[project_name]['freshbooks']['project-id']
     task_id = config[project_name]['freshbooks']['task-id']
@@ -551,9 +596,11 @@ def timestamp_main():
     if not os.path.exists(expected_filename):
         with open(expected_filename, mode='w') as newfile:
             newfile.write('{:<24}Arrived and logged in\n'.format(datetime.datetime.now().strftime(DATE_TIME_FORMAT)))
-            events = get_google_calendar_events_for_day(credentials, http, service)
-            print_google_calendar_events(events, newfile)
-
+            try:
+                events = get_google_calendar_events_for_day()
+                print_google_calendar_events(events, newfile)
+            except:
+                pass
         os.system('open {}'.format(expected_filename))
         update_input = False
 
@@ -606,7 +653,7 @@ def days_end_main():
             print('')
         print('{:<24}Leaving for the day, Hours for today: {}\n'.format(desired_date.strftime(DATE_TIME_FORMAT), datetime.datetime.now() - start_timestamp))
 
-        all_history = get_chrome_history(desired_date)
+        all_history = get_chrome_history(desired_date.date())
         all_history.extend(get_utils_actions(desired_date))
         all_history.extend(get_bash_history2(desired_date))
         print('\n=============    Actions HISTORY ================')
