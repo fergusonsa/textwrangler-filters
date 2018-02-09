@@ -561,9 +561,10 @@ def create_invoice(end_of_week_date=None, config=None):
                     tsk = tasks_details[te.task_id]
                     added = c.invoice.lines.add(invoice_id=invoice_response.invoice.invoice_id,
                                                 lines=[refreshbooks.api.types.line(name=tsk.task.name,
+                                                                                   description='[{}] Scott Ferguson'.format(te.date),
                                                                                    unit_cost=tsk.task.rate,
                                                                                    quantity=te.hours,
-                                                                                   amount=(tsk.task.rate * hours),
+                                                                                   amount=(tsk.task.rate.pyval * te.hours.pyval),
                                                                                    tax1_name='HST',
                                                                                    tax1_percent=13)])
                     # Mark the time entry as billed
