@@ -105,7 +105,7 @@ def parse_isoformat_datetime(dt_str):
     return output_datetime
 
 
-def get_credentials():
+def get_credentials(flags=None):
     """Gets valid user credentials from storage.
 
     If nothing has been stored, or if the stored credentials are invalid,
@@ -130,14 +130,14 @@ def get_credentials():
         if flags:
             credentials = tools.run_flow(flow, store, flags)
         else: # Needed only for compatibility with Python 2.6
-            credentials = tools.run(flow, store)
+            credentials = tools.run_flow(flow, store)
         print('Storing credentials to ' + credential_path)
     return credentials
 
 
-def get_google_calendar_events_for_day(creds=None, http=None, service=None, dt=None):
-    if not creds:
-        creds = get_credentials()
+def get_google_calendar_events_for_day(credentials=None, http=None, service=None, dt=None):
+    if not credentials:
+        credentials = get_credentials()
     if not http:
         http = credentials.authorize(httplib2.Http())
     if not service:
@@ -162,7 +162,7 @@ def print_google_calendar_events(events, output=sys.stdout):
             start = parse_isoformat_datetime(event['start'].get('dateTime', event['start'].get('date')))
             end = event['end'].get('dateTime', event['end'].get('date'))
             length = parse_isoformat_datetime(end) - start
-            output.write('{:<24} {} {} {}\n'.format(start.strftime(daysend.DATE_TIME_FORMAT),
+            output.write('{:<24} {} {} {}\n'.format(start.strftime(DATE_TIME_FORMAT),
                                                     event['summary'],
                                                     timedelta_format(length, '%H hours %M minutes'),
                                                     event['location']))
@@ -600,7 +600,9 @@ def timestamp_main():
                 events = get_google_calendar_events_for_day()
                 print_google_calendar_events(events, newfile)
             except:
-                pass
+                e = sys.exc_info()
+                newfile.write('\nEXCEPTION trying to get google calendar events! {} \n{} \n{}\n'.format(e[0], e[1], e[2]))
+
         os.system('open {}'.format(expected_filename))
         update_input = False
 
@@ -651,7 +653,7 @@ def days_end_main():
     if update_input or (is_yesterdays_file and last_line != "==============================\n"):
         if not last_line.endswith(os.linesep):
             print('')
-        print('{:<24}Leaving for the day, Hours for today: {}\n'.format(desired_date.strftime(DATE_TIME_FORMAT), datetime.datetime.now() - start_timestamp))
+        print('{:<24}Leaving for the day, Hours for today: {}\n'.format(desired_date.strftime(DATE_TIME_FORMAT), timedelta_format(datetime.datetime.now() - start_timestamp, '%H hours %M minutes')))
 
         all_history = get_chrome_history(desired_date.date())
         all_history.extend(get_utils_actions(desired_date))
