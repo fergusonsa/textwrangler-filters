@@ -1,7 +1,10 @@
 #!/usr/bin/python
 from __future__ import print_function
 import datetime
+import email.MIMEMultipart
+import email.MIMEText
 import fileinput
+import glob 
 import httplib2
 import lxml.objectify
 import numbers
@@ -10,6 +13,7 @@ import os.path
 import re
 import refreshbooks.api
 import shutil
+import smtplib
 import sqlite3
 import string
 import subprocess
@@ -18,7 +22,7 @@ import tempfile
 import traceback
 import webbrowser
 import yaml
-import glob 
+import zipfile
 
 from apiclient import discovery
 from oauth2client import client
@@ -135,15 +139,15 @@ def get_credentials(flags=None):
     return credentials
 
 
-def get_google_calendar_events_for_day(credentials=None, http=None, service=None, dt=None):
+def get_google_calendar_events_for_day(dt=None, credentials=None, http=None, service=None):
+    if not dt:
+        dt = datetime.datetime.today()
     if not credentials:
         credentials = get_credentials()
     if not http:
         http = credentials.authorize(httplib2.Http())
     if not service:
         service = discovery.build('calendar', 'v3', http=http)
-    if not dt:
-        dt = datetime.datetime.today()
 
     st_of_day = datetime.datetime.combine(dt.date(), datetime.time())
     end_of_day = st_of_day + datetime.timedelta(days=1)
@@ -162,7 +166,7 @@ def print_google_calendar_events(events, output=sys.stdout):
             start = parse_isoformat_datetime(event['start'].get('dateTime', event['start'].get('date')))
             end = event['end'].get('dateTime', event['end'].get('date'))
             length = parse_isoformat_datetime(end) - start
-            output.write('{:<24} {} {} {}\n'.format(start.strftime(DATE_TIME_FORMAT),
+            output.write('{:<24}{} {} {}\n'.format(start.strftime(DATE_TIME_FORMAT),
                                                     event['summary'],
                                                     timedelta_format(length, '%H hours %M minutes'),
                                                     event['location']))
@@ -211,7 +215,8 @@ def get_chrome_history_copy_paths(for_date=None):
 def cleanup(dir_path):
     if os.path.isfile(dir_path):    
         dir_path = os.path.dirname(dir_path)
-    if os.path.exists(dir_path) and dir_path != os.path.expanduser('~') and dir_path != '/':
+#     if os.path.exists(dir_path) and dir_path != os.path.expanduser('~') and dir_path != '/':
+    if os.path.exists(dir_path) and dir_path.startswith(tempfile.gettempdir()):
 #         print('Deleting files in {}'.format(dir_path))
         shutil.rmtree(dir_path)
 #         shutil.rmtree(dir_path, ignore_errors=True)
@@ -302,23 +307,31 @@ def get_todays_file_path(todays_date_str=None):
                                         '{}.txt'.format(todays_date_str)))
 
 
-def skip_existing_contents(expected_filename, todays_date_str, previous_date):
-    if not os.path.exists(expected_filename):
-        update_input = False
+def skip_existing_contents(todays_date_str=None, previous_date=None, expected_filename=None, input_src=None):
+    """ 
+    Arguments:
+        todays_date_str - Optional - 
+        previous_date - Optional - 
+        expected_filename - Optional - 
+    """
+    if input_src is None:
+        input_src = fileinput.input()
+        
+    update_input = not expected_filename and not os.path.exists(expected_filename)
 
     last_line = ''
-    for line in fileinput.input():
+    for line in input_src:
         last_line = line
         if fileinput.isfirstline():
             # Check the start of the first line to make sure that it has today's date
-            update_input = line.startswith(todays_date_str)
+            update_input = todays_date_str and line.startswith(todays_date_str)
             parts = NOTE_FILE_LINE_PATTERN.match(line)
             if parts:
                 start_timestamp = datetime.datetime(int(parts.group(1)), int(parts.group(2)), int(parts.group(3)),
                                               int(parts.group(4)), int(parts.group(5)))
             else:
                 start_timestamp = None
-            is_yesterdays_file = line.startswith(previous_date.isoformat())
+            is_yesterdays_file = previous_date and line.startswith(previous_date.isoformat())
 
         print(line, end='')
     return update_input, is_yesterdays_file, last_line, start_timestamp
@@ -500,6 +513,31 @@ def prep_timesheets(hours, end_of_week_date=None, config=None):
         os.system('open "{}"'.format(new_filename))
 
 
+def email_archived_notes(start_date, end_date=None):
+    """Email archived notes files from the start date to the end date, inclusive, 
+    to the configured email account."""
+    
+    if end_date is None:
+        end_date=datetime.date.today()
+    # get the files from between the start and end dates
+    dir_path = os.path.abspath(os.path.join(os.path.expanduser('~'), 'notes'))
+    files_list = [os.path.join(dir_path, fl) for fl in os.listdir(dir_path) if is_filename_between_dates(fl, start_date, end_date)]
+    archive_file_path = os.path.join(tempfile.mkdtemp(), 'notes_archive_{}_to_{}.zip'.format(start_date.isoformat(), end_date.isoformat()))
+    archive_file = zipfile.ZipFile(archive_file_path, "w" )
+
+    for file in files_list:
+        archive_file.write(file, compress_type=zipfile.ZIP_DEFLATED)
+
+
+#     msg = email.MIMEMultipart.MIMEMultipart()
+#     msg.attach(email.MIMEText.MIMEText(file(archive_file_path).read()))
+# 
+#     mailer = smtplib.SMTP()
+#     mailer.connect()
+#     mailer.sendmail(from_, to, msg.as_string())
+#     mailer.close()
+    
+    
 def get_month_first_date(dtDateTime):
     """From http://code.activestate.com/recipes/476197-first-last-day-of-the-month/ """
     #what is the first day of the current month
@@ -575,6 +613,7 @@ def create_invoice(end_of_week_date=None, config=None):
 
     else:
         print('No time entries to add to an invoice between the dates {} and {}'.format(start_date.isoformat(), end_date.isoformat()))
+
 """
           <amount>40</amount>
           <name>Yard work</name>
@@ -589,6 +628,18 @@ def create_invoice(end_of_week_date=None, config=None):
 """
 
 
+def calendar_events_main(desired_date=None):
+    if not desired_date:
+        desired_date = datetime.date.today()
+    skip_existing_contents()
+    try:
+        events = get_google_calendar_events_for_day(dt=desired_date)
+        print_google_calendar_events(events)
+    except:
+        e = sys.exc_info()
+        newfile.write('\nEXCEPTION trying to get google calendar events! {} \n{} \n{}\n'.format(e[0], e[1], e[2]))
+
+    
 def timestamp_main():
     todays_date_str = datetime.date.today().isoformat()
     update_input = True
@@ -642,9 +693,10 @@ def days_end_main():
     is_yesterdays_file = False
     expected_filename = get_todays_file_path()
 
-    (update_input, is_yesterdays_file, last_line, start_timestamp) = skip_existing_contents(expected_filename,
+    (update_input, is_yesterdays_file, last_line, start_timestamp) = skip_existing_contents(
                                                                            todays_date_str,
-                                                                           yesterdays_date)
+                                                                           yesterdays_date,
+                                                                           expected_filename)
 
     if is_yesterdays_file and last_line != "==============================":
         desired_date = yesterdays_date
