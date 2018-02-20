@@ -169,7 +169,7 @@ def print_google_calendar_events(events, output=sys.stdout):
             output.write('{:<24}{} {} {}\n'.format(start.strftime(DATE_TIME_FORMAT),
                                                     event['summary'],
                                                     timedelta_format(length, '%H hours %M minutes'),
-                                                    event['location']))
+                                                    event.get('location')))
 
 
 def get_config():
@@ -519,25 +519,58 @@ def email_archived_notes(start_date, end_date=None):
     
     if end_date is None:
         end_date=datetime.date.today()
+        
     # get the files from between the start and end dates
     dir_path = os.path.abspath(os.path.join(os.path.expanduser('~'), 'notes'))
     files_list = [os.path.join(dir_path, fl) for fl in os.listdir(dir_path) if is_filename_between_dates(fl, start_date, end_date)]
-    archive_file_path = os.path.join(tempfile.mkdtemp(), 'notes_archive_{}_to_{}.zip'.format(start_date.isoformat(), end_date.isoformat()))
-    archive_file = zipfile.ZipFile(archive_file_path, "w" )
+    file_name = 'notes_archive_{}_to_{}.zip'.format(start_date.isoformat(), end_date.isoformat())
+    archive_file_path = os.path.join(tempfile.mkdtemp(), file_name)
+    with zipfile.ZipFile(archive_file_path, "w" ) as archive_file:
+        print('Creating zip file {}'.format(archive_file_path))
+        for file in files_list:
+            print('Adding file {}'.format(file))
+            archive_file.write(file, compress_type=zipfile.ZIP_DEFLATED)
 
-    for file in files_list:
-        archive_file.write(file, compress_type=zipfile.ZIP_DEFLATED)
-
-
+    shutil.move(archive_file_path, dir_path)
+                
+#     send_from = 'fergusonsa@yahoo.com'
 #     msg = email.MIMEMultipart.MIMEMultipart()
-#     msg.attach(email.MIMEText.MIMEText(file(archive_file_path).read()))
+#     msg['From'] = send_from
+#     msg['To'] = email.utils.COMMASPACE.join(send_from)
+#     msg['Date'] = email.utils.formatdate(localtime=True)
+#     msg['Subject'] = 'Archive of notes files from {} to {}'.format(start_date, end_date)
+# 
+#     msg.attach(email.MIMEText.MIMEText(msg['Subject']))
+# 
+# 
+#     attachment = email.mime.base.MIMEBase('application', 'zip')
+#     with open(archive_file_path, "rb" ) as archive_file:
+#         attachment.set_payload(archive_file.read())
+#     email.encoders.encode_base64(attachment)
+#     attachment.add_header('Content-Disposition', 'attachment', filename=file_name)
+#     msg.attach(attachment)
 # 
 #     mailer = smtplib.SMTP()
 #     mailer.connect()
 #     mailer.sendmail(from_, to, msg.as_string())
 #     mailer.close()
-    
-    
+# 
+#     username = 'fergusonsa'
+#     password = 'sackville'
+#     try :
+#         server = smtplib.SMTP("smtp.mail.yahoo.com",587)
+#         server.ehlo()
+#         server.starttls  #in yahoo use smtplib.SMTP_SSL()
+#         server.ehlo()
+#         server.login(username,password)
+#         server.sendmail(send_from, send_from, msg)
+#         server.quit()    
+#         print('ok the email has sent ')
+#     except :
+#         print('can\'t send the Email')  
+#         e = sys.exc_info()
+#         print('\nEXCEPTION trying to get google calendar events! {} \n{} \n{}\n'.format(e[0], e[1], e[2]))
+
 def get_month_first_date(dtDateTime):
     """From http://code.activestate.com/recipes/476197-first-last-day-of-the-month/ """
     #what is the first day of the current month
@@ -637,7 +670,7 @@ def calendar_events_main(desired_date=None):
         print_google_calendar_events(events)
     except:
         e = sys.exc_info()
-        newfile.write('\nEXCEPTION trying to get google calendar events! {} \n{} \n{}\n'.format(e[0], e[1], e[2]))
+        print('\nEXCEPTION trying to get google calendar events! {} \n{} \n{}\n'.format(e[0], e[1], e[2]))
 
     
 def timestamp_main():
@@ -679,7 +712,7 @@ def weeks_end_main(end_of_week_date=None):
     hours = get_notes_history()
     config = get_timesheet_config()
 
-    print_notes_times(desired_date, hours)
+    print_notes_times(end_of_week_date, hours)
     update_freshbooks_timesheet(end_of_week_date, hours)
     create_invoice(end_of_week_date, config)
     prep_timesheets(hours, end_of_week_date)
