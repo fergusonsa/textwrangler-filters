@@ -386,13 +386,14 @@ def get_file_history(file_path):
             "period": last_timestamp - first_timestamp if last_timestamp and first_timestamp else None}
 
 
-def get_notes_history(end_date=None):
+def get_notes_history(end_date=None, start_date=None):
     if end_date is None:
         end_date=get_end_of_week_date()
     # Get list of files from the past week
-    week_start_date = end_date - datetime.timedelta(days=6)
+    if start_date is None:
+        start_date = end_date - datetime.timedelta(days=6)
     dir_path = os.path.abspath(os.path.join(os.path.expanduser('~'), 'notes'))
-    files_list = [fl for fl in os.listdir(dir_path) if is_filename_between_dates(fl, week_start_date, end_date)]
+    files_list = [fl for fl in os.listdir(dir_path) if is_filename_between_dates(fl, start_date, end_date)]
     res = {}
     for x in files_list:
         res[x] = get_file_history(os.path.join(dir_path, x))
@@ -434,20 +435,23 @@ def create_freshbooks_client(config=None):
 
 
 """
+import daysend
 from daysend import *
 end_of_week_date = get_end_of_week_date()
-hours = get_notes_history()
+hours = get_notes_history(end_of_week_date)
 config = get_timesheet_config()
 c = create_freshbooks_client(config)
 
-update_freshbooks_timesheet(end_of_week_date, hours)
+update_freshbooks_timesheet(end_of_week_date, hours_data=hours)
 create_invoice(end_of_week_date, config)
 prep_timesheets(hours, end_of_week_date)
 
 """
-def update_freshbooks_timesheet(end_of_week_date=None, hours_data=None, config=None):
+def update_freshbooks_timesheet(end_of_week_date=None, start_date=None, hours_data=None, config=None):
     if end_of_week_date is None:
         end_of_week_date = get_end_of_week_date()
+    if start_date is None:
+        start_date = end_of_week_date - datetime.timedelta(days=6)
     if hours_data is None:
         hours_data = get_notes_history(end_of_week_date)
     if config is None:
@@ -460,11 +464,9 @@ def update_freshbooks_timesheet(end_of_week_date=None, hours_data=None, config=N
     task_id = config[project_name]['freshbooks']['task-id']
     hours_per_day = config[project_name]['daily-hours']
     task_list = c.task.list(project_id=project_id)
-
-    week_start_date = end_of_week_date - datetime.timedelta(days=6)
-    tes = c.time_entry.list(project_id=project_id, date_from=week_start_date.isoformat(), date_to=end_of_week_date.isoformat())
+    tes = c.time_entry.list(project_id=project_id, date_from=start_date.isoformat(), date_to=end_of_week_date.isoformat())
     if tes.time_entries.get('total') != '0':
-        print('Existing time entries between {} and {}'.format(week_start_date.isoformat(), end_of_week_date.isoformat()))
+        print('Existing time entries between {} and {}'.format(start_date.isoformat(), end_of_week_date.isoformat()))
         for te in tes.time_entries.time_entry:
             print(te.date, te.hours, te.billed)
     if isinstance(hours_per_day, numbers.Number):
@@ -589,19 +591,18 @@ def get_month_last_date(dtDateTime):
     return nextMonth - delta                 #subtract from nextMonth and return
 
 
-def create_invoice(end_of_week_date=None, config=None):
-    if end_of_week_date is None:
-        end_of_week_date = get_end_of_week_date()
+def create_invoice(end_date=None, start_date=None, config=None):
     if config is None:
         config = get_timesheet_config()
 
     project_name = config['current-project']
-    if config[project_name]['invoice-frequency'] == 'weekly':
-        end_date = get_end_of_week_date()
-        start_date = end_date - datetime.timedelta(days=6)
-    elif config[project_name]['invoice-frequency'] == 'monthly':
-        end_date = get_month_last_date(get_end_of_week_date())
-        start_date = get_month_first_date(end_date)
+    if not end_date or not start_date:
+        if config[project_name]['invoice-frequency'] == 'weekly':
+            end_date = get_end_of_week_date()
+            start_date = end_date - datetime.timedelta(days=6)
+        elif config[project_name]['invoice-frequency'] == 'monthly':
+            end_date = get_month_last_date(get_end_of_week_date())
+            start_date = get_month_first_date(end_date)
 
     c = create_freshbooks_client(config)
 
@@ -660,6 +661,44 @@ def create_invoice(end_of_week_date=None, config=None):
           <type>Item</type>
 """
 
+def get_unbilled_time_entries(start_date, end_date=None, config=None, c=None):
+    if end_date is None:
+        end_date = datetime.date.today()
+    if config is None:
+        config = get_timesheet_config()   
+    if c is None:
+        c = create_freshbooks_client(config)
+                
+    project_name = config['current-project']
+    project_id = config[project_name]['freshbooks']['project-id']
+
+    tes = c.time_entry.list(project_id=project_id,
+                            date_from=start_date.isoformat(),
+                            date_to=end_date.isoformat())
+
+    if tes.time_entries.get('total') != '0':
+        # Check the number of unbilled hours to be added to the invoice
+        unbilled_entries = [te for te in tes.time_entries.time_entry if te.billed.text == '0']
+#         print("list of unbilled hours: ", [float(te.hours.text) for te in unbilled_entries])
+#         num_hours = sum([float(te.hours.text) for te in unbilled_entries])
+        return unbilled_entries
+    else:
+#         print('No time entries between {} and {}.'.format(start_date, end_date))
+        return []
+
+def mark_time_entries_as_billed(start_date, end_date=None, config=None, c=None):
+    if end_date is None:
+        end_date = datetime.date.today()
+    if config is None:
+        config = get_timesheet_config()   
+    if c is None:
+        c = create_freshbooks_client(config)
+    
+    unbilled_entries = get_unbilled_time_entries(start_date, end_date, config, c)
+    if unbilled_entries:
+        for te in unbilled_entries:
+            resp = c.time_entry.update(id=te.time_entry_id,
+                                       billed=1)
 
 def calendar_events_main(desired_date=None):
     if not desired_date:
@@ -704,17 +743,18 @@ def timestamp_main():
         print('{:<24}'.format(datetime.datetime.now().strftime(DATE_TIME_FORMAT)), end='')
 
 
-def weeks_end_main(end_of_week_date=None):
+def weeks_end_main(end_of_week_date=None, start_date=None):
     """ IN PROGRESS"""
     if end_of_week_date is None:
         end_of_week_date = get_end_of_week_date()
-
-    hours = get_notes_history()
+    if start_date is None:
+        start_date = end_date - datetime.timedelta(days=6)
+    hours = get_notes_history(end_of_week_date, start_date)
     config = get_timesheet_config()
 
     print_notes_times(end_of_week_date, hours)
-    update_freshbooks_timesheet(end_of_week_date, hours)
-    create_invoice(end_of_week_date, config)
+    update_freshbooks_timesheet(end_of_week_date, start_date, hours)
+    create_invoice(end_of_week_date, start_date, config)
     prep_timesheets(hours, end_of_week_date)
 
 
