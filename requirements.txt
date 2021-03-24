@@ -33,7 +33,7 @@ pyparsing==2.0.1
 pyRFC3339==0.2
 python-dateutil==1.5
 pytz==2016.10
-rsa==3.4.2
+rsa==4.1
 scipy==0.13.0b1
 six==1.11.0
 uritemplate==3.0.0
