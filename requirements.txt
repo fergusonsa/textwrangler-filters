@@ -28,7 +28,7 @@ prettyprinter==0.4.0
 py2app==0.7.3
 pyasn1==0.4.2
 pyasn1-modules==0.2.1
-Pygments==2.2.0
+Pygments==2.7.4
 pyparsing==2.0.1
 pyRFC3339==0.2
 python-dateutil==1.5
