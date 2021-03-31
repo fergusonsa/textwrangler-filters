@@ -4,7 +4,7 @@ refreshbooks==2.0
 requests==2.18.4
 oauth2client==4.1.2
 google-api-python-client==1.6.4
-lxml==4.1.0
+lxml==4.6.3
 pyOpenSSL==0.13.1
 edn-format==0.5.12
 
