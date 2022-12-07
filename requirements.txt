@@ -12,7 +12,7 @@ edn-format==0.5.12
 altgraph==0.10.2
 bdist-mpkg==0.5.0
 bonjour-py==0.3
-certifi==2017.11.5
+certifi==2022.12.7
 chardet==3.0.4
 colorama==0.3.9
 colorful==0.4.0
